@@ -570,13 +570,21 @@ func panelStatsHandler(w http.ResponseWriter, r *http.Request) {
 	sent := count(`SELECT COUNT(*) FROM messages WHERE is_from_me = 1 AND timestamp >= ?`, startOfDay)
 	viaAPI := count(`SELECT COUNT(*) FROM panel_api_sends WHERE sent_at >= ?`, startOfDay)
 
-	// media diaria dos 7 dias anteriores, para o comparativo
-	weekAgo := startOfDay.AddDate(0, 0, -7)
-	prev := count(`SELECT COUNT(*) FROM messages WHERE is_from_me = 0 AND timestamp >= ? AND timestamp < ?`,
-		weekAgo, startOfDay)
+	// Comparativo justo: hoje so foi ate agora, entao os 7 dias anteriores sao
+	// contados ate o MESMO horario. Comparar meio dia com dias inteiros faria o
+	// painel acusar queda toda manha e recuperacao toda noite, sem nada ter mudado.
+	elapsed := now.Sub(startOfDay)
+	sameWindow := 0
+	for i := 1; i <= 7; i++ {
+		from := startOfDay.AddDate(0, 0, -i)
+		sameWindow += count(
+			`SELECT COUNT(*) FROM messages WHERE is_from_me = 0 AND timestamp >= ? AND timestamp < ?`,
+			from, from.Add(elapsed))
+	}
 	var deltaPct *int
-	if prev > 0 {
-		avg := float64(prev) / 7.0
+	// De madrugada a base e minuscula e a porcentagem oscila de forma absurda
+	// (duas mensagens viram +200%). Abaixo de uma base minima, nao mostra numero.
+	if avg := float64(sameWindow) / 7.0; avg >= 3 {
 		d := int((float64(received)/avg - 1) * 100)
 		deltaPct = &d
 	}

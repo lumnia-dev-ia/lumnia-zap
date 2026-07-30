@@ -348,7 +348,7 @@ async function refreshStats() {
     $('v-sent').textContent = s.sent_today;
     $('v-api').textContent  = s.sent_via_api;
     $('s-rec').innerHTML = s.delta_pct == null ? 'sem base de comparação'
-      : `<span class="${s.delta_pct >= 0 ? 'up' : 'down'}">${s.delta_pct >= 0 ? '+' : ''}${s.delta_pct}%</span> vs. média de 7 dias`;
+      : `<span class="${s.delta_pct >= 0 ? 'up' : 'down'}">${s.delta_pct >= 0 ? '+' : ''}${s.delta_pct}%</span> vs. mesmo horário, média de 7 dias`;
     $('s-api').textContent = `${s.used_last_hour} na última hora, de ${s.hourly_limit} permitidas`;
     drawSpark($('k-rec'),  s.spark_received);
     drawSpark($('k-sent'), s.spark_sent);

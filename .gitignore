@@ -15,3 +15,8 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# scripts de setup pessoais, nao fazem parte do produto
+migrar.sh
+preparar-repo.sh
+publicar-github.sh

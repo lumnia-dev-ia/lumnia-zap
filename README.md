@@ -14,9 +14,11 @@ into something a non-developer can actually run and keep running.
 A local web panel (served by the bridge itself, no extra process) with
 connection status, one-click reconnect, an in-browser QR code for re-pairing,
 daily counters, and scheduled messages — once, daily, weekly, or yearly, the
-last one being what birthday greetings need. A macOS launchd service so the
-bridge survives reboots and restarts itself if it dies. A signed installer, an
-app icon, and a two-click setup aimed at family members.
+last one being what birthday greetings need. A background service so the bridge
+survives reboots and restarts itself if it dies: a launchd agent on macOS, a
+Startup shortcut plus a watchdog script on Windows. An installer, an app icon,
+and a two-click setup aimed at family members — signed and notarized by Apple on
+macOS, unsigned and still in beta on Windows.
 
 It also carries four upstream bug fixes, described below, without which the
 original project does not currently run.
@@ -27,7 +29,21 @@ original project does not currently run.
 
 ### Instalação
 
-*(em breve: instalador assinado para macOS Apple Silicon)*
+**macOS** (Apple Silicon — M1 ou mais novo). Baixe o
+[Instalador-Lumnia-Zap.zip](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/Instalador-Lumnia-Zap.zip),
+descompacte e dê duplo clique. O instalador é assinado e notarizado pela Apple,
+então não aparece aviso de segurança. Ele não pede senha de administrador.
+
+**Windows 10/11 64-bit — beta.** Baixe o
+[Instalador-Lumnia-Zap-Windows.exe](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/Instalador-Lumnia-Zap-Windows.exe)
+e dê duplo clique. Ainda não há assinatura Authenticode, então o SmartScreen vai
+mostrar "O Windows protegeu seu PC" na primeira execução — clique em *Mais
+informações* → *Executar assim mesmo*. Detalhes em
+[README-windows.md](README-windows.md).
+
+Nos dois casos é preciso ter o [Claude Desktop](https://claude.ai/download)
+instalado. Depois de instalar, escaneie o QR code que abre no navegador e
+reinicie o Claude Desktop.
 
 ### O que ele faz
 

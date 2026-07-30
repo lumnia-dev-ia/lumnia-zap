@@ -20,3 +20,8 @@ __pycache__/
 migrar.sh
 preparar-repo.sh
 publicar-github.sh
+
+# build e distribuicao — Windows
+dist-windows/
+*.exe
+*.zip

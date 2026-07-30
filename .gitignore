@@ -1,3 +1,17 @@
-*.db
-claude_desktop_config.json
-whatsapp.log
+# runtime — nunca versionar sessao nem mensagens
+whatsapp-bridge/store/
+whatsapp-bridge/whatsapp-bridge
+*.log
+
+# build e distribuicao
+dist/
+*.tar.gz
+*.app/
+
+# python
+__pycache__/
+.venv/
+*.pyc
+
+# macOS
+.DS_Store

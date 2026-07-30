@@ -18,7 +18,6 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/mdp/qrterminal"
 
 	"bytes"
 
@@ -641,8 +640,9 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 	}
 
 	// Download the media using whatsmeow client
-	mediaData, err := client.Download(downloader)
+	mediaData, err := client.Download(context.Background(), downloader)
 	if err != nil {
+		fmt.Printf("DOWNLOAD-ERRO detalhado: type=%s url=%s directPath=%s len=%d err=%v\n", mediaType, url, directPath, fileLength, err)
 		return false, "", "", "", fmt.Errorf("failed to download media: %v", err)
 	}
 
@@ -668,10 +668,11 @@ func extractDirectPathFromURL(url string) string {
 
 	pathPart := parts[1]
 
-	// Remove query parameters
-	pathPart = strings.SplitN(pathPart, "?", 2)[0]
-
-	// Create proper direct path format
+	// IMPORTANTE: NAO remover a query string. O whatsmeow monta a URL final como
+	// "https://<host>" + directPath + "&hash=...&mms-type=..." (ver
+	// DownloadMediaWithPath), usando "&" como separador. Portanto o directPath tem
+	// que carregar a query assinada pelo WhatsApp ("?ccb=...&oh=...&oe=...").
+	// Removê-la gera uma URL malformada e o servidor de midia responde 403.
 	return "/" + pathPart
 }
 
@@ -708,6 +709,9 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		// Send the message
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
 		fmt.Println("Message sent", success, message)
+		if success {
+			recordAPISend(req.Recipient, "mcp")
+		}
 		// Set response headers
 		w.Header().Set("Content-Type", "application/json")
 
@@ -800,14 +804,14 @@ func main() {
 		return
 	}
 
-	container, err := sqlstore.New("sqlite3", "file:store/whatsapp.db?_foreign_keys=on", dbLog)
+	container, err := sqlstore.New(context.Background(), "sqlite3", "file:store/whatsapp.db?_foreign_keys=on", dbLog)
 	if err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)
 		return
 	}
 
 	// Get device store - This contains session information
-	deviceStore, err := container.GetFirstDevice()
+	deviceStore, err := container.GetFirstDevice(context.Background())
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// No device exists, create one
@@ -834,12 +838,18 @@ func main() {
 	}
 	defer messageStore.Close()
 
+	// Painel de controle local (panel.go)
+	initPanel(client, messageStore, container, logger)
+
 	// Setup event handling for messages and history sync
 	client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
 		case *events.Message:
 			// Process regular messages
 			handleMessage(client, messageStore, v, logger)
+			if !v.Info.IsFromMe {
+				panelNoteReceived()
+			}
 
 		case *events.HistorySync:
 			// Process history sync events
@@ -850,60 +860,20 @@ func main() {
 
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
+			go panelHandleLoggedOut()
 		}
 	})
 
-	// Create channel to track connection success
-	connected := make(chan bool, 1)
+	// Conexao nao-bloqueante (panel.go). Critico: se a sessao morreu, o processo
+	// precisa continuar vivo para servir o painel e exibir o QR code. O codigo
+	// original bloqueava aqui e saia por timeout, derrubando o servico em loop.
+	panelConnect()
 
-	// Connect to WhatsApp
-	if client.Store.ID == nil {
-		// No ID stored, this is a new client, need to pair with phone
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
-		if err != nil {
-			logger.Errorf("Failed to connect: %v", err)
-			return
-		}
+	fmt.Println("\n✓ Ponte iniciada. Painel: http://localhost:8080")
 
-		// Print QR code for pairing with phone
-		for evt := range qrChan {
-			if evt.Event == "code" {
-				fmt.Println("\nScan this QR code with your WhatsApp app:")
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-			} else if evt.Event == "success" {
-				connected <- true
-				break
-			}
-		}
-
-		// Wait for connection
-		select {
-		case <-connected:
-			fmt.Println("\nSuccessfully connected and authenticated!")
-		case <-time.After(3 * time.Minute):
-			logger.Errorf("Timeout waiting for QR code scan")
-			return
-		}
-	} else {
-		// Already logged in, just connect
-		err = client.Connect()
-		if err != nil {
-			logger.Errorf("Failed to connect: %v", err)
-			return
-		}
-		connected <- true
-	}
-
-	// Wait a moment for connection to stabilize
-	time.Sleep(2 * time.Second)
-
-	if !client.IsConnected() {
-		logger.Errorf("Failed to establish stable connection")
-		return
-	}
-
-	fmt.Println("\n✓ Connected to WhatsApp! Type 'help' for commands.")
+	// Rotas e agendador do painel (panel.go) — registradas no mesmo mux
+	registerPanelRoutes()
+	startPanelScheduler()
 
 	// Start REST API server
 	startRESTServer(client, messageStore, 8080)
@@ -973,7 +943,7 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 
 		// If we didn't get a name, try group info
 		if name == "" {
-			groupInfo, err := client.GetGroupInfo(jid)
+			groupInfo, err := client.GetGroupInfo(context.Background(), jid)
 			if err == nil && groupInfo.Name != "" {
 				name = groupInfo.Name
 			} else {
@@ -987,10 +957,29 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 		// This is an individual contact
 		logger.Infof("Getting name for contact: %s", chatJID)
 
-		// Just use contact info (full name)
-		contact, err := client.Store.Contacts.GetContact(jid)
+		// LID-style JIDs (@lid) are opaque identifiers WhatsApp uses instead of the
+		// phone number. The contact store is keyed by phone JID, so resolve the LID
+		// to its phone JID first — otherwise the lookup always misses and we fall
+		// back to showing the raw LID as the chat name.
+		lookupJID := jid
+		if jid.Server == types.HiddenUserServer {
+			if altJID, err := client.Store.GetAltJID(context.Background(), jid); err == nil && !altJID.IsEmpty() {
+				logger.Infof("Resolved LID %s to %s", jid.String(), altJID.String())
+				lookupJID = altJID
+			}
+		}
+
+		// Use contact info, preferring the most human-readable field available
+		contact, err := client.Store.Contacts.GetContact(context.Background(), lookupJID)
 		if err == nil && contact.FullName != "" {
 			name = contact.FullName
+		} else if err == nil && contact.BusinessName != "" {
+			name = contact.BusinessName
+		} else if err == nil && contact.PushName != "" {
+			name = contact.PushName
+		} else if lookupJID.Server == types.DefaultUserServer {
+			// No saved contact: the phone number is still more useful than a LID
+			name = lookupJID.User
 		} else if sender != "" {
 			// Fallback to sender
 			name = sender

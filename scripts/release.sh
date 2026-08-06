@@ -52,14 +52,20 @@ mkdir -p "$DIST" "$STATE"
 
 # enviar <zip> <nome> — submete sem esperar e guarda o id
 enviar() {
-  local zip="$1" nome="$2" id
+  local zip="$1" nome="$2" id saida
   if [ -f "$STATE/$nome.id" ]; then
     echo "     $nome: já enviado ($(cat "$STATE/$nome.id"))"
     return 0
   fi
-  id="$(xcrun notarytool submit "$zip" --keychain-profile "$PERFIL" --no-wait 2>&1 \
-        | awk '/^[[:space:]]*id:/ {print $2; exit}')"
-  [ -n "$id" ] || falhar "não consegui enviar $nome para notarização"
+  # NAO encadear o notarytool direto num pipe: com set -e -o pipefail, uma
+  # falha dele matava o script ANTES de imprimir qualquer coisa — o erro real
+  # sumia junto. Capturamos a resposta inteira e mostramos se nao vier o id.
+  saida="$(xcrun notarytool submit "$zip" --keychain-profile "$PERFIL" --no-wait 2>&1)" || true
+  id="$(printf '%s\n' "$saida" | awk '/^[[:space:]]*id:/ {print $2; exit}')"
+  if [ -z "$id" ]; then
+    printf '%s\n' "$saida" | sed 's/^/     /'
+    falhar "não consegui enviar $nome para notarização (resposta da Apple acima)"
+  fi
   printf '%s' "$id" > "$STATE/$nome.id"
   echo "     $nome enviado: $id"
 }
@@ -72,7 +78,7 @@ aguardar() {
   printf '     %s: aguardando' "$nome"
   while :; do
     status="$(xcrun notarytool info "$id" --keychain-profile "$PERFIL" 2>&1 \
-              | awk '/^[[:space:]]*status:/ {print $2; exit}')"
+              | awk '/^[[:space:]]*status:/ {print $2; exit}')" || true
     case "$status" in
       Accepted)
         printf ' aceito\n'; marcar "$nome.notarized"; return 0 ;;

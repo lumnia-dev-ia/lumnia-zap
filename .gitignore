@@ -25,3 +25,6 @@ publicar-github.sh
 dist-windows/
 *.exe
 *.zip
+
+# copia .txt do diagnostico (so para enviar por WhatsApp, .cmd e bloqueado)
+scripts/diagnostico-lumnia-zap.cmd.txt

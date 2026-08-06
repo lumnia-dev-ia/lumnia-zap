@@ -164,10 +164,19 @@ func panelConnect() {
 }
 
 // panelHandleLoggedOut reage ao WhatsApp encerrar a sessao do aparelho.
+//
+// Quando o aparelho e removido (pelo celular ou pelo botao desvincular), o
+// whatsmeow APAGA o device do banco e o *Client em memoria fica inutilizavel:
+// toda reconexao falha com "invalid use of deleted device", para sempre — foi
+// exatamente o que um log de producao mostrou, com o painel servindo um QR
+// quebrado. Nao ha como reaproveitar o cliente; o caminho certo e encerrar o
+// processo e deixar o supervisor (launchd no macOS, o laco do iniciar.cmd no
+// Windows) subir uma copia limpa, que ao nao achar aparelho no banco gera um
+// QR novo. O historico de mensagens fica intacto: mora em messages.db.
 func panelHandleLoggedOut() {
-	panel.logger.Warnf("Sessao encerrada pelo WhatsApp — aguardando novo pareamento")
+	panel.logger.Warnf("Sessao encerrada pelo WhatsApp — reiniciando para gerar um novo QR code")
 	time.Sleep(2 * time.Second)
-	panelConnect()
+	os.Exit(0)
 }
 
 func panelSetQR(code string) {
@@ -666,15 +675,18 @@ func panelUnlinkHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cliente indisponivel", http.StatusServiceUnavailable)
 		return
 	}
+	writeJSON(w, map[string]interface{}{"ok": true})
 	go func() {
 		if err := client.Logout(context.Background()); err != nil {
 			panel.logger.Warnf("Painel: logout retornou erro (%v) — desconectando de todo modo", err)
 			client.Disconnect()
 		}
+		// mesmo caso do LoggedOut: depois do logout o device foi apagado e o
+		// cliente em memoria nao serve mais. Reinicia para parear do zero.
+		panel.logger.Warnf("Desvinculado — reiniciando para gerar um novo QR code")
 		time.Sleep(1 * time.Second)
-		panelConnect()
+		os.Exit(0)
 	}()
-	writeJSON(w, map[string]interface{}{"ok": true})
 }
 
 func panelContactsHandler(w http.ResponseWriter, r *http.Request) {

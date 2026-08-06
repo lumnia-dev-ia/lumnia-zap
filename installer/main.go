@@ -12,6 +12,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -34,7 +35,10 @@ const (
 
 func main() {
 	if err := instalar(); err != nil {
-		alerta("A instalação não foi concluída", err.Error()+"\n\nNada foi deixado pela metade — pode tentar de novo.", true)
+		progressoFalhar(err.Error())
+		alerta("A instalação não foi concluída",
+			err.Error()+"\n\nAbri uma página no navegador com os detalhes.\n\n"+
+				"Nada foi deixado pela metade — pode tentar de novo.", true)
 		os.Exit(1)
 	}
 }
@@ -72,14 +76,23 @@ func instalar() error {
 	}
 	destino := filepath.Join(home, "Library", "Application Support", "LumniaZap")
 
-	etapa("Baixando o " + produto + "…")
+	// A partir daqui a instalacao pode demorar. Abre a tela de progresso para
+	// que ninguem fique olhando para uma tela parada sem saber se travou.
+	progressoAbrir()
+
+	etapa(0)
+	// Se ja existe instalacao, para a ponte antes de trocar os arquivos: nao
+	// da para substituir com seguranca um binario que esta rodando.
+	pararServico()
+
+	etapa(1)
 	tgz, err := baixar(pacoteURL)
 	if err != nil {
 		return fmt.Errorf("não consegui baixar o pacote (verifique sua internet): %v", err)
 	}
 	defer os.Remove(tgz)
 
-	etapa("Instalando…")
+	etapa(2)
 	if err := os.MkdirAll(destino, 0o755); err != nil {
 		return err
 	}
@@ -90,18 +103,18 @@ func instalar() error {
 		return err
 	}
 
-	etapa("Preparando o ambiente…")
+	etapa(3)
 	uv, err := garantirUV(home)
 	if err != nil {
 		return fmt.Errorf("não consegui preparar o ambiente Python: %v", err)
 	}
 
-	etapa("Conectando ao Claude Desktop…")
+	etapa(4)
 	if err := registrarNoClaude(home, destino, uv); err != nil {
 		return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
 	}
 
-	etapa("Configurando o serviço…")
+	etapa(5)
 	if err := instalarServico(home, destino); err != nil {
 		return fmt.Errorf("falha ao configurar o serviço: %v", err)
 	}
@@ -109,21 +122,131 @@ func instalar() error {
 		return fmt.Errorf("falha ao criar o atalho: %v", err)
 	}
 
-	etapa("Iniciando…")
-	subirServico(home)
+	etapa(6)
+	if err := subirServico(home); err != nil {
+		return fmt.Errorf("falha ao iniciar o serviço.\n\n%v", err)
+	}
 	if !esperarPainel(40 * time.Second) {
-		return fmt.Errorf("o serviço não respondeu a tempo.\n\nO log está em:\n%s",
-			filepath.Join(destino, "logs", "bridge.log"))
+		return fmt.Errorf("o serviço não respondeu a tempo.\n\n%s", porQueNaoSubiu(destino))
 	}
 
-	exec.Command("/usr/bin/open", painelURL).Run()
+	progressoConcluir()
 	alerta("Pronto!",
 		"O "+produto+" está instalado.\n\n"+
 			"A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu "+
 			"celular em Configurações → Aparelhos conectados.\n\n"+
-			"Depois, feche o Claude Desktop e abra de novo.\n\n"+
+			"Depois, feche o Claude Desktop com Cmd+Q e abra de novo.\n\n"+
 			"O atalho ficou na sua Mesa.", false)
 	return nil
+}
+
+// ------------------------------------------------------------------ progresso
+
+// A tela de progresso e uma pagina HTML local que se recarrega sozinha a cada
+// segundo. E feia de propósito: nao depende de nenhuma biblioteca grafica,
+// funciona em qualquer Mac e usa o mesmo navegador que ja vai abrir o painel
+// no final. Sem ela a instalacao parece travada, porque baixar 15 MB e rodar
+// o `uv sync` leva um tempo em que nada aparece na tela.
+
+var passos = []string{
+	"Verificando o Mac",
+	"Baixando o " + produto + " (uns 15 MB)",
+	"Instalando os arquivos",
+	"Preparando o ambiente Python",
+	"Conectando ao Claude Desktop",
+	"Configurando o serviço",
+	"Iniciando a ponte",
+}
+
+var (
+	passoAtual   = -1
+	paginaPath   = filepath.Join(os.TempDir(), "lumnia-zap-instalacao.html")
+	paginaAberta bool
+)
+
+func progressoAbrir() {
+	passoAtual = 0
+	escreverPagina(cabecalhoPagina(1), corpoPassos(), "")
+	if !paginaAberta {
+		exec.Command("/usr/bin/open", paginaPath).Run()
+		paginaAberta = true
+		time.Sleep(700 * time.Millisecond) // deixa o navegador aparecer
+	}
+}
+
+func etapa(i int) {
+	passoAtual = i
+	escreverPagina(cabecalhoPagina(1), corpoPassos(), "")
+}
+
+func progressoConcluir() {
+	passoAtual = len(passos)
+	// A propria pagina vira o painel: recarrega apontando para o QR code.
+	escreverPagina(
+		`<meta http-equiv="refresh" content="3; url=`+painelURL+`">`,
+		corpoPassos()+`<p class="ok">Pronto! Abrindo o painel com o QR code…</p>`,
+		"")
+}
+
+func progressoFalhar(detalhe string) {
+	if !paginaAberta {
+		return // nem chegou a comecar; o alerta sozinho ja explica
+	}
+	extra := `<p class="erro"><b>A instalação parou aqui.</b></p><pre>` +
+		html.EscapeString(detalhe) + `</pre>` +
+		`<p>Mande esta tela para o Diego — ela já tem o que ele precisa.</p>`
+	escreverPagina("", corpoPassos(), extra)
+}
+
+func cabecalhoPagina(segundos int) string {
+	return fmt.Sprintf(`<meta http-equiv="refresh" content="%d">`, segundos)
+}
+
+func corpoPassos() string {
+	var b strings.Builder
+	b.WriteString(`<ol>`)
+	for i, p := range passos {
+		classe, marca := "futuro", "○"
+		switch {
+		case i < passoAtual:
+			classe, marca = "feito", "✓"
+		case i == passoAtual:
+			classe, marca = "agora", "●"
+		}
+		fmt.Fprintf(&b, `<li class="%s"><span class="m">%s</span>%s</li>`,
+			classe, marca, html.EscapeString(p))
+	}
+	b.WriteString(`</ol>`)
+	return b.String()
+}
+
+func escreverPagina(cabecalho, corpo, extra string) {
+	pag := `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
+		cabecalho +
+		`<title>Instalando o ` + produto + `</title><style>
+body{font:16px/1.55 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+ max-width:560px;margin:60px auto;padding:0 24px;color:#1c1c1e;background:#fff}
+h1{font-size:22px;margin:0 0 4px}
+p.sub{color:#6b6b70;margin:0 0 28px}
+ol{list-style:none;padding:0;margin:0}
+li{padding:9px 0;display:flex;align-items:baseline;gap:12px;border-bottom:1px solid #f0f0f2}
+li:last-child{border-bottom:0}
+.m{width:18px;display:inline-block;text-align:center}
+.feito{color:#8a8a8e}.feito .m{color:#34a853}
+.agora{font-weight:600}.agora .m{color:#1a73e8}
+.futuro{color:#b8b8bd}
+p.ok{margin-top:28px;font-weight:600;color:#34a853}
+p.erro{margin-top:28px;color:#c5221f}
+pre{white-space:pre-wrap;word-break:break-word;background:#f6f6f8;border:1px solid #e5e5ea;
+ border-radius:8px;padding:14px;font:12px/1.5 ui-monospace,Menlo,monospace;color:#3c3c43}
+@media (prefers-color-scheme:dark){
+ body{background:#1c1c1e;color:#f2f2f7}li{border-bottom-color:#2c2c2e}
+ pre{background:#2c2c2e;border-color:#3a3a3c;color:#d1d1d6}p.sub{color:#98989d}}
+</style></head><body>
+<h1>Instalando o ` + produto + `</h1>
+<p class="sub">Pode deixar esta janela aberta. Leva de um a três minutos.</p>` +
+		corpo + extra + `</body></html>`
+	os.WriteFile(paginaPath, []byte(pag), 0o644)
 }
 
 // ------------------------------------------------------------------ download
@@ -189,19 +312,65 @@ func extrair(tgz, destino string) error {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(alvo), 0o755); err != nil {
+			// Os "._alguma-coisa" sao resource forks que o tar do macOS gera
+			// junto. Nao servem para nada aqui e so poluem a pasta.
+			if strings.HasPrefix(filepath.Base(rel), "._") {
+				continue
+			}
+			if err := escreverArquivo(alvo, tr, os.FileMode(h.Mode).Perm()); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(alvo, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(h.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
-				return err
-			}
-			out.Close()
 		}
+	}
+	return nil
+}
+
+// escreverArquivo grava num arquivo temporario e troca por cima com rename,
+// em vez de truncar o arquivo que ja existe.
+//
+// Isto nao e frescura: sobrescrever um binario ASSINADO no lugar mantem o
+// mesmo inode, e o kernel do macOS continua com a assinatura antiga em cache
+// para aquele arquivo. O binario novo nao bate com ela e todo exec passa a
+// morrer com SIGKILL — "load code signature error" no log do sistema e
+// `last exit reason = OS_REASON_CODESIGNING` no launchctl. Foi exatamente
+// isso que quebrou a reinstalacao no Mac do meu pai em 06/08/2026: a ponte
+// era morta 2.380 vezes seguidas e o log ficava vazio, porque o processo
+// morria antes de escrever a primeira linha.
+//
+// O rename e atomico e sempre produz um inode novo, entao o kernel avalia a
+// assinatura do zero. De quebra, definir a permissao na mao evita o caso do
+// arquivo vir somente-leitura no pacote e a proxima instalacao falhar com
+// "permission denied" — a mesma classe de bug que apareceu no Windows.
+func escreverArquivo(alvo string, r io.Reader, modo os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(alvo), 0o755); err != nil {
+		return err
+	}
+	tmp := alvo + ".novo"
+	_ = os.Remove(tmp)
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, r); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if modo == 0 {
+		modo = 0o644
+	}
+	// Chmod explicito: o modo do OpenFile passa pelo umask do usuario.
+	if err := os.Chmod(tmp, modo|0o200); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, alvo); err != nil {
+		os.Remove(tmp)
+		return err
 	}
 	return nil
 }
@@ -306,13 +475,55 @@ func instalarServico(home, destino string) error {
 	return os.WriteFile(filepath.Join(agentes, label+".plist"), []byte(plist), 0o644)
 }
 
-func subirServico(home string) {
+// pararServico derruba uma instancia anterior antes de trocar os arquivos.
+// Erro aqui e esperado quando nao havia nada instalado.
+func pararServico() {
+	uid := fmt.Sprint(os.Getuid())
+	exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+label).Run()
+	time.Sleep(1500 * time.Millisecond)
+}
+
+// subirServico carrega o LaunchAgent e DEVOLVE o erro do launchctl.
+//
+// A versao anterior chamava bootout e bootstrap com `.Run()` e jogava fora o
+// resultado dos dois. Quando o bootstrap falhava — e ele falha com
+// "Bootstrap failed: 5: Input/output error" se o job anterior ainda estiver
+// morrendo — o instalador seguia em frente, esperava o painel e terminava
+// com um "o serviço não respondeu a tempo" que nao dizia nada. Silenciar
+// stderr ja custou caro tres vezes neste projeto; aqui nao mais.
+func subirServico(home string) error {
 	uid := fmt.Sprint(os.Getuid())
 	plist := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
-	// se ja estava carregado, descarrega antes para pegar a versao nova
-	exec.Command("/bin/launchctl", "bootout", "gui/"+uid+"/"+label).Run()
-	time.Sleep(500 * time.Millisecond)
-	exec.Command("/bin/launchctl", "bootstrap", "gui/"+uid, plist).Run()
+
+	// Um job pode ter ficado marcado como desabilitado por uma tentativa
+	// anterior. Esse marcador sobrevive a reinstalacao e a reinicio, e
+	// enquanto ele estiver la nem bootstrap nem RunAtLoad sobem coisa alguma.
+	exec.Command("/bin/launchctl", "enable", "gui/"+uid+"/"+label).Run()
+
+	saidaBootout, _ := exec.Command("/bin/launchctl",
+		"bootout", "gui/"+uid+"/"+label).CombinedOutput()
+
+	// O launchd leva um instante para liberar o nome do job depois do
+	// bootout. Meio segundo fixo nao bastava; aqui tentamos seis vezes com
+	// espera crescente (1s, 2s, 3s... ate 6s).
+	var ultimo string
+	for tentativa := 1; tentativa <= 6; tentativa++ {
+		time.Sleep(time.Duration(tentativa) * time.Second)
+		out, err := exec.Command("/bin/launchctl",
+			"bootstrap", "gui/"+uid, plist).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		ultimo = strings.TrimSpace(string(out))
+		if ultimo == "" {
+			ultimo = err.Error()
+		}
+	}
+	msg := "o launchctl recusou iniciar o serviço depois de 6 tentativas.\n\nÚltimo erro:\n" + ultimo
+	if s := strings.TrimSpace(string(saidaBootout)); s != "" {
+		msg += "\n\nSaída do bootout anterior:\n" + s
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 func esperarPainel(limite time.Duration) bool {
@@ -326,6 +537,68 @@ func esperarPainel(limite time.Duration) bool {
 		time.Sleep(time.Second)
 	}
 	return false
+}
+
+// porQueNaoSubiu monta o relatorio que o instalador antigo nao dava: em vez
+// de apontar o caminho de um log que quase sempre esta vazio, ele mesmo le o
+// estado do launchd e o fim dos dois logs, e traduz o motivo mais comum.
+func porQueNaoSubiu(destino string) string {
+	uid := fmt.Sprint(os.Getuid())
+	saida, _ := exec.Command("/bin/launchctl", "print", "gui/"+uid+"/"+label).CombinedOutput()
+
+	var estado []string
+	for _, l := range strings.Split(string(saida), "\n") {
+		t := strings.TrimSpace(l)
+		for _, chave := range []string{"state = ", "job state = ", "last exit reason = ",
+			"last exit code = ", "runs = "} {
+			if strings.HasPrefix(t, chave) {
+				estado = append(estado, t)
+			}
+		}
+	}
+
+	msg := "Estado do serviço:\n  " + strings.Join(estado, "\n  ")
+	if len(estado) == 0 {
+		msg = "O launchd não tem o serviço carregado."
+	}
+
+	if strings.Contains(string(saida), "OS_REASON_CODESIGNING") {
+		msg += "\n\nO sistema está matando a ponte por assinatura de código.\n" +
+			"Rode o instalador mais uma vez: esta versão substitui o arquivo\n" +
+			"por um novo em vez de escrever por cima, o que resolve esse caso."
+	}
+
+	logs := filepath.Join(destino, "logs")
+	msg += "\n\nFim de bridge-error.log:\n" + ultimasLinhas(filepath.Join(logs, "bridge-error.log"), 12)
+	msg += "\n\nFim de bridge.log:\n" + ultimasLinhas(filepath.Join(logs, "bridge.log"), 12)
+	return msg
+}
+
+// ultimasLinhas devolve o fim de um arquivo de log, pulando as linhas de
+// conversa (que comecam com a data entre colchetes) para nao expor mensagem
+// de ninguem numa tela que provavelmente vai virar print.
+func ultimasLinhas(caminho string, n int) string {
+	b, err := os.ReadFile(caminho)
+	if err != nil {
+		return "  (arquivo não existe)"
+	}
+	if len(b) == 0 {
+		return "  (vazio)"
+	}
+	var uteis []string
+	for _, l := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		if strings.HasPrefix(l, "[20") || strings.ContainsAny(l, "█▀▄") {
+			continue
+		}
+		uteis = append(uteis, "  "+l)
+	}
+	if len(uteis) > n {
+		uteis = uteis[len(uteis)-n:]
+	}
+	if len(uteis) == 0 {
+		return "  (nada além de mensagens)"
+	}
+	return strings.Join(uteis, "\n")
 }
 
 // ------------------------------------------------------------------ atalho
@@ -368,6 +641,7 @@ URL="%s"
 MYUID="$(/usr/bin/id -u)"
 alive() { /usr/bin/curl -s -o /dev/null --max-time 2 "$URL/api/panel/status"; }
 if ! alive; then
+	/bin/launchctl enable "gui/$MYUID/$LABEL" 2>/dev/null
 	if ! /bin/launchctl kickstart -k "gui/$MYUID/$LABEL" 2>/dev/null; then
 		/bin/launchctl bootstrap "gui/$MYUID" "$HOME/Library/LaunchAgents/$LABEL.plist" 2>/dev/null
 	fi
@@ -401,11 +675,6 @@ func osa(script string) (string, error) {
 
 func escapar(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`)
-}
-
-func etapa(msg string) {
-	// notificacao discreta: nao bloqueia o fluxo
-	osa(fmt.Sprintf(`display notification "%s" with title "%s"`, escapar(msg), produto))
 }
 
 func alerta(titulo, msg string, critico bool) {

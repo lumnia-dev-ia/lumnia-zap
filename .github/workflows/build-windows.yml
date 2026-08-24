@@ -1,0 +1,29 @@
+name: Build & publish Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão a publicar (ex.: 1.0.2)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp-bridge/go.mod
+
+      - name: Instalar mingw-w64 e zip
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
+
+      - name: Compilar e publicar (release-windows.sh --fresh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/release-windows.sh "${{ inputs.versao }}" --fresh

@@ -128,11 +128,17 @@ func instalar() error {
 		return err
 	}
 
-	if !claudeInstalado(home) {
+	// Quais agentes de IA existem neste PC. As duas checagens sao informativas
+	// e conservadoras — nunca bloqueiam a instalacao. O Codex e aditivo: quem
+	// tem os dois configura os dois; quem tem so o Claude segue como antes.
+	claudeDetectado := claudeInstalado(home)
+	codexDetectado := detectarCodex(home)
+
+	if !claudeDetectado && !codexDetectado {
 		fmt.Println()
-		fmt.Println("Não encontramos automaticamente o Claude Desktop instalado neste PC.")
-		fmt.Println("Isso pode ser normal (a instalação do Claude varia de PC pra PC) — mas")
-		fmt.Println("o " + produto + " só funciona dentro do Claude Desktop.")
+		fmt.Println("Não encontramos automaticamente o Claude Desktop (nem o OpenAI Codex)")
+		fmt.Println("instalado neste PC. Isso pode ser normal (a instalação varia de PC pra")
+		fmt.Println("PC) — mas o " + produto + " só funciona dentro de um deles.")
 		if !confirmar("Baixar o Claude Desktop agora antes de continuar?", false) {
 			// segue sem abrir nada
 		} else {
@@ -143,11 +149,19 @@ func instalar() error {
 		}
 	}
 
+	agentes := "ao Claude"
+	switch {
+	case claudeDetectado && codexDetectado:
+		agentes = "ao Claude e ao Codex"
+	case codexDetectado:
+		agentes = "ao Codex"
+	}
+
 	// Tela de consentimento: a pessoa merece saber o que esta aceitando.
 	fmt.Println()
-	fmt.Println("Isto conecta o seu WhatsApp ao Claude neste PC.")
+	fmt.Println("Isto conecta o seu WhatsApp " + agentes + " neste PC.")
 	fmt.Println()
-	fmt.Println("O Claude passa a poder LER e RESPONDER suas mensagens quando você pedir.")
+	fmt.Println("O assistente passa a poder LER e RESPONDER suas mensagens quando você pedir.")
 	fmt.Println("Suas conversas ficam guardadas só aqui, neste computador.")
 	fmt.Println()
 	fmt.Println("Você conecta escaneando um QR code, igual ao WhatsApp Web, e pode")
@@ -197,8 +211,24 @@ func instalar() error {
 	}
 
 	etapa("Conectando ao Claude Desktop…")
+	// O Claude e configurado mesmo quando a deteccao nao o achou: a checagem
+	// e conservadora e a configuracao pronta nao atrapalha nada (era assim
+	// antes do Codex existir aqui, e continua).
 	if err := registrarNoClaude(home, destino, uv); err != nil {
 		return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
+	}
+
+	avisoCodex := ""
+	if codexDetectado {
+		etapa("Conectando ao OpenAI Codex…")
+		// O Codex e aditivo: um problema aqui nao pode derrubar uma
+		// instalacao que ja deixou o Claude funcionando.
+		if err := registrarNoCodex(home, destino, uv); err != nil {
+			avisoCodex = err.Error()
+			fmt.Println("     (aviso: não consegui configurar o Codex:", err, ")")
+		} else {
+			fmt.Println("     lumnia-zap registrado em", filepath.Join(codexHome(home), "config.toml"))
+		}
 	}
 
 	etapa("Configurando o serviço…")
@@ -248,10 +278,30 @@ func instalar() error {
 	fmt.Println()
 	fmt.Println(produto + " está instalado.")
 	fmt.Println()
+	fmt.Println("Agentes de IA")
+	if claudeDetectado {
+		fmt.Println("  [OK] Claude configurado")
+	} else {
+		fmt.Println("  [--] Claude não encontrado (a configuração ficou pronta para quando instalar)")
+	}
+	switch {
+	case !codexDetectado:
+		fmt.Println("  [--] Codex não encontrado (se instalar depois, rode este instalador de novo)")
+	case avisoCodex != "":
+		fmt.Println("  [!!] Codex: " + avisoCodex)
+	default:
+		fmt.Println("  [OK] Codex configurado")
+	}
+	fmt.Println()
 	fmt.Println("A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu")
 	fmt.Println("celular em Configurações → Aparelhos conectados.")
 	fmt.Println()
-	fmt.Println("Depois, feche o Claude Desktop e abra de novo.")
+	if claudeDetectado {
+		fmt.Println("Depois, feche o Claude Desktop e abra de novo.")
+	}
+	if codexDetectado && avisoCodex == "" {
+		fmt.Println("No Codex, o lumnia-zap já entra na próxima sessão.")
+	}
 	fmt.Println()
 	fmt.Println("O atalho ficou na sua Área de Trabalho e no Menu Iniciar (procure")
 	fmt.Println("por Lumnia Zap), e a ponte inicia sozinha quando você liga o PC.")

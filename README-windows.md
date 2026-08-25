@@ -29,6 +29,7 @@ Windows:
 |---|---|
 | `~/Library/Application Support/LumniaZap` | `%LOCALAPPDATA%\LumniaZap` |
 | `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` (mesmo formato/local documentado pela Anthropic) |
+| `~/.codex/config.toml` (OpenAI Codex, se detectado) | `%USERPROFILE%\.codex\config.toml` (mesmo formato TOML documentado pela OpenAI; `CODEX_HOME` é respeitado nos dois) |
 | LaunchAgent (`launchctl`) com `KeepAlive` | atalho `.lnk` na pasta **Startup** do usuário + um `watchdog.vbs` que reinicia a ponte se ela cair (checa `/api/panel/status` a cada 15s) |
 | diálogos via `osascript` | prompts no console (é um app de console — a janela preta que abre ao dar duplo clique) + uma caixa de mensagem final via PowerShell (best-effort) |
 | atalho `.app` na Mesa | atalho `.lnk` na Área de Trabalho (criado via COM do PowerShell, `WScript.Shell`) |
@@ -62,7 +63,9 @@ que é vírus.
 3. Confirme no console (S/n), espere baixar/instalar, escaneie o QR code que
    abre no navegador.
 4. Feche e abra o Claude Desktop de novo — o servidor `lumnia-zap` deve
-   aparecer no indicador de MCP.
+   aparecer no indicador de MCP. Se o PC tiver o OpenAI Codex, confira também
+   `codex mcp list` (ou abra `%USERPROFILE%\.codex\config.toml`): a seção
+   `[mcp_servers.lumnia-zap]` deve estar lá, com o resto do arquivo intacto.
 5. Reinicie o PC e confirme que a ponte volta sozinha (o atalho da pasta
    Startup deve disparar o `watchdog.vbs`).
 

@@ -1,12 +1,30 @@
 # Lumnia Zap
 
-Your personal WhatsApp, inside Claude. Read and reply to your own messages by
-asking — no bot, no auto-responder, no business API.
+Your personal WhatsApp, connected locally to MCP-compatible AI agents. Read
+and reply to your own messages by asking — no bot, no auto-responder, no
+business API. Officially supported clients today: **Claude Desktop** and
+**OpenAI Codex**. One bridge, one MCP server, several agents:
+
+```
+WhatsApp
+    ↓
+whatsapp-bridge  (local, SQLite)
+    ↓
+whatsapp-mcp-server
+    ↓
+   MCP
+ ┌──┴─────────┐
+ ↓            ↓
+Claude      Codex
+```
+
+The MCP architecture means other clients can be added later; only the two
+above have installers and documentation here today.
 
 Lumnia Zap adds an operational layer on top of
 [whatsapp-mcp](https://github.com/lharries/whatsapp-mcp) by Luke Harries, whose
 code does the hard part: speaking WhatsApp's multi-device protocol and exposing
-it to Claude over MCP. What this project adds is everything needed to turn that
+it over MCP. What this project adds is everything needed to turn that
 into something a non-developer can actually run and keep running.
 
 **What's new here**
@@ -16,7 +34,9 @@ connection status, one-click reconnect, an in-browser QR code for re-pairing,
 daily counters, and scheduled messages — once, daily, weekly, or yearly, the
 last one being what birthday greetings need. A background service so the bridge
 survives reboots and restarts itself if it dies: a launchd agent on macOS, a
-Startup shortcut plus a watchdog script on Windows. An installer, an app icon,
+Startup shortcut plus a watchdog script on Windows. Automatic registration of
+the `lumnia-zap` MCP server in Claude Desktop and in OpenAI Codex — both point
+at the same server and the same local database. An installer, an app icon,
 and a two-click setup aimed at family members — signed and notarized by Apple on
 macOS, unsigned and still in beta on Windows.
 
@@ -41,17 +61,64 @@ mostrar "O Windows protegeu seu PC" na primeira execução — clique em *Mais
 informações* → *Executar assim mesmo*. Detalhes em
 [README-windows.md](README-windows.md).
 
-Nos dois casos é preciso ter o [Claude Desktop](https://claude.ai/download)
-instalado. Depois de instalar, escaneie o QR code que abre no navegador e
-reinicie o Claude Desktop.
+Nos dois casos é preciso ter pelo menos um cliente MCP instalado — o
+[Claude Desktop](https://claude.ai/download) e/ou o
+[OpenAI Codex](https://developers.openai.com/codex). O instalador detecta os
+que existirem na máquina e configura cada um; se você instalar o outro depois,
+basta rodar o instalador de novo. Depois de instalar, escaneie o QR code que
+abre no navegador e reinicie o Claude Desktop (no Codex, o servidor entra na
+próxima sessão).
 
 ### O que ele faz
 
 Conecta como um aparelho vinculado, igual ao WhatsApp Web — não é a API
 comercial da Meta. Suas conversas ficam num banco local na sua máquina, e vão
-para o Claude apenas quando você pede para ler ou processar algo.
+para o Claude ou para o Codex apenas quando você pede para ler ou processar
+algo — através das ferramentas MCP servidas localmente. Não existe servidor da
+Lumnia no meio: nada das suas mensagens sobe para infraestrutura de terceiros
+além do próprio agente que você chamou.
 
 O painel abre em `http://localhost:8080` e é inacessível de fora da máquina.
+
+### Clientes MCP suportados
+
+| Cliente | macOS | Windows |
+|---|---|---|
+| Claude Desktop | ✓ validado em uso real | ✓ beta, validado em PCs da família |
+| OpenAI Codex | ⚠ implementado, ainda não testado num Mac real | ⚠ implementado, ainda não testado num PC real |
+
+O registro no Codex segue o formato oficial da OpenAI
+(`~/.codex/config.toml`; no Windows, `%USERPROFILE%\.codex\config.toml`) e os
+testes automatizados cobrem criação, preservação de configuração existente,
+atualização e idempotência — mas o ambiente onde esta versão foi produzida não
+executa macOS nem Windows, então a passada de ponta a ponta com o Codex de
+verdade ainda está pendente. Se você validar, abra uma issue contando.
+
+Os dois clientes usam a MESMA infraestrutura: uma ponte, um banco SQLite, um
+servidor MCP. Nada é duplicado.
+
+### Aprovação antes de enviar mensagens
+
+Ferramentas de leitura (`list_chats`, `list_messages`, `search_contacts`…) só
+consultam o banco local. Já `send_message`, `send_file` e `send_audio_message`
+agem no mundo: mandam mensagem de verdade para uma pessoa de verdade.
+
+**No Codex**, o instalador registra essas três ferramentas com
+`approval_mode = "prompt"` — o Codex pede sua confirmação antes de cada envio,
+enquanto as de leitura seguem a política de aprovação que você já usa. Isso
+fica na seção do próprio `lumnia-zap` no `config.toml`, sem tocar nas suas
+preferências globais (o recurso existe a partir do Codex 0.144, de
+julho/2026). Para ajustar na mão — por exemplo, exigir aprovação também para
+leitura — edite a seção:
+
+```toml
+[mcp_servers.lumnia-zap]
+default_tools_approval_mode = "prompt"   # tudo pede aprovação
+```
+
+**No Claude Desktop**, o próprio app pede permissão ao usar ferramentas de um
+servidor MCP, conforme as permissões que você der na conversa — o instalador
+não muda nada nesse comportamento.
 
 ### Aviso honesto
 

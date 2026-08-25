@@ -51,28 +51,45 @@ func instalar() error {
 		return fmt.Errorf("este instalador é só para Macs com chip Apple (M1 ou mais novo).\n" +
 			"Se o seu Mac é Intel, fale com o Diego")
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	// Quais agentes de IA existem neste Mac. O Codex e aditivo: quem tem os
+	// dois configura os dois; quem tem so um segue como antes. So bloqueamos
+	// quando nao ha NENHUM cliente MCP para conectar.
+	claudeOK := true
 	if _, err := os.Stat(claudeApp); os.IsNotExist(err) {
-		if perguntar("Claude Desktop não encontrado",
-			"O "+produto+" funciona dentro do Claude Desktop, que não está instalado neste Mac.\n\n"+
+		claudeOK = false
+	}
+	codexOK := detectarCodex(home)
+	if !claudeOK && !codexOK {
+		if perguntar("Nenhum agente de IA encontrado",
+			"O "+produto+" funciona dentro do Claude Desktop (ou do OpenAI Codex), "+
+				"e nenhum dos dois está instalado neste Mac.\n\n"+
 				"Quer abrir a página de download do Claude agora?") {
 			exec.Command("/usr/bin/open", claudeBaixa).Run()
 		}
-		return fmt.Errorf("instale o Claude Desktop e rode este instalador de novo")
+		return fmt.Errorf("instale o Claude Desktop (ou o Codex) e rode este instalador de novo")
+	}
+
+	agentes := "ao Claude"
+	switch {
+	case claudeOK && codexOK:
+		agentes = "ao Claude e ao Codex"
+	case codexOK:
+		agentes = "ao Codex"
 	}
 
 	// Tela de consentimento: a pessoa merece saber o que esta aceitando.
 	if !perguntar("Instalar o "+produto+"?",
-		"Isto conecta o seu WhatsApp ao Claude neste Mac.\n\n"+
-			"O Claude passa a poder LER e RESPONDER suas mensagens quando você pedir. "+
+		"Isto conecta o seu WhatsApp "+agentes+" neste Mac.\n\n"+
+			"O assistente passa a poder LER e RESPONDER suas mensagens quando você pedir. "+
 			"Suas conversas ficam guardadas só aqui, neste computador.\n\n"+
 			"Você conecta escaneando um QR code, igual ao WhatsApp Web, e pode "+
 			"desconectar quando quiser.") {
 		return fmt.Errorf("instalação cancelada por você")
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
 	}
 	destino := filepath.Join(home, "Library", "Application Support", "LumniaZap")
 
@@ -110,8 +127,19 @@ func instalar() error {
 	}
 
 	etapa(4)
-	if err := registrarNoClaude(home, destino, uv); err != nil {
-		return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
+	var avisoCodex string
+	if claudeOK {
+		if err := registrarNoClaude(home, destino, uv); err != nil {
+			return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
+		}
+	}
+	if codexOK {
+		// O Codex e aditivo: um problema aqui nao pode derrubar uma
+		// instalacao que ja deixou o Claude funcionando. Guardamos o aviso
+		// para mostrar no resumo final em vez de abortar.
+		if err := registrarNoCodex(home, destino, uv); err != nil {
+			avisoCodex = err.Error()
+		}
 	}
 
 	etapa(5)
@@ -131,13 +159,42 @@ func instalar() error {
 	}
 
 	progressoConcluir()
+	proximo := ""
+	if claudeOK {
+		proximo += "Depois, feche o Claude Desktop com Cmd+Q e abra de novo.\n\n"
+	}
+	if codexOK && avisoCodex == "" {
+		proximo += "No Codex, o lumnia-zap já entra na próxima sessão.\n\n"
+	}
 	alerta("Pronto!",
 		"O "+produto+" está instalado.\n\n"+
+			resumoAgentes(claudeOK, codexOK, avisoCodex)+"\n\n"+
 			"A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu "+
 			"celular em Configurações → Aparelhos conectados.\n\n"+
-			"Depois, feche o Claude Desktop com Cmd+Q e abra de novo.\n\n"+
+			proximo+
 			"O atalho ficou na sua Mesa.", false)
 	return nil
+}
+
+// resumoAgentes monta as linhas do resumo final: quem foi configurado, quem
+// nao foi encontrado e o que deu errado — para ninguem sair achando que o
+// Codex foi configurado num Mac que nem o tem.
+func resumoAgentes(claudeOK, codexOK bool, avisoCodex string) string {
+	linhas := []string{"Agentes de IA:"}
+	if claudeOK {
+		linhas = append(linhas, "✓ Claude configurado")
+	} else {
+		linhas = append(linhas, "○ Claude não encontrado")
+	}
+	switch {
+	case !codexOK:
+		linhas = append(linhas, "○ Codex não encontrado")
+	case avisoCodex != "":
+		linhas = append(linhas, "✗ Codex: "+avisoCodex)
+	default:
+		linhas = append(linhas, "✓ Codex configurado")
+	}
+	return strings.Join(linhas, "\n")
 }
 
 // ------------------------------------------------------------------ progresso
@@ -153,7 +210,7 @@ var passos = []string{
 	"Baixando o " + produto + " (uns 15 MB)",
 	"Instalando os arquivos",
 	"Preparando o ambiente Python",
-	"Conectando ao Claude Desktop",
+	"Configurando os agentes de IA (Claude/Codex)",
 	"Configurando o serviço",
 	"Iniciando a ponte",
 }

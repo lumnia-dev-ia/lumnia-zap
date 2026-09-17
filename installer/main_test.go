@@ -21,7 +21,12 @@ func TestPaginas(t *testing.T) {
 	etapa(3)
 
 	paginaPath = dir + "/3-fim.html"
-	progressoConcluir()
+	progressoConcluir(resumoHTML(
+		[]string{
+			"/Users/exemplo/Library/Application Support/Claude",
+			"/Users/exemplo/Library/Application Support/Claude Desktop",
+		},
+		true, "", "/Users/exemplo/Desktop/Lumnia-Zap-instalacao.txt"))
 
 	paginaPath = dir + "/4-erro.html"
 	passoAtual = 6

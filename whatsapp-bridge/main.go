@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -904,6 +905,7 @@ func main() {
 
 		case *events.Connected:
 			logger.Infof("Connected to WhatsApp")
+			lidBackfillOnce.Do(func() { go backfillLIDChatNames(client, messageStore, logger) })
 
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
@@ -944,7 +946,10 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 	// First, check if chat already exists in database with a name
 	var existingName string
 	err := messageStore.db.QueryRow("SELECT name FROM chats WHERE jid = ?", chatJID).Scan(&existingName)
-	if err == nil && existingName != "" {
+	// Um chat @lid gravado antes da resolucao de LID ficou com o proprio numero
+	// LID como nome. Tratar esse caso como "sem nome" para que a resolucao
+	// abaixo rode e o INSERT OR REPLACE do chamador corrija o banco.
+	if err == nil && existingName != "" && !(jid.Server == types.HiddenUserServer && existingName == jid.User) {
 		// Chat exists with a name, use that
 		logger.Infof("Using existing chat name for %s: %s", chatJID, existingName)
 		return existingName
@@ -1039,6 +1044,52 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 	}
 
 	return name
+}
+
+// Passada unica, na primeira conexao: renomeia chats @lid cujo nome ainda e o
+// proprio numero LID (gravados antes da resolucao via GetAltJID). Chats sem
+// mensagem nova nunca passariam pelo GetChatName de novo, entao ficariam
+// sem nome indefinidamente. Sugestao de D1g1t4lWaveRider no PR #307 upstream.
+var lidBackfillOnce sync.Once
+
+func backfillLIDChatNames(client *whatsmeow.Client, messageStore *MessageStore, logger waLog.Logger) {
+	rows, err := messageStore.db.Query("SELECT jid, name FROM chats WHERE jid LIKE '%@lid'")
+	if err != nil {
+		logger.Warnf("LID backfill: falha ao listar chats: %v", err)
+		return
+	}
+	type pending struct{ jid, name string }
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.jid, &p.name); err == nil {
+			todo = append(todo, p)
+		}
+	}
+	rows.Close()
+
+	renamed, unresolved := 0, 0
+	for _, p := range todo {
+		jid, err := types.ParseJID(p.jid)
+		if err != nil || jid.Server != types.HiddenUserServer {
+			continue
+		}
+		if p.name != "" && p.name != jid.User {
+			continue // ja tem nome de verdade
+		}
+		// sender vazio: sem mensagem em maos, a unica fonte e o store de contatos
+		name := GetChatName(client, messageStore, jid, p.jid, nil, "", logger)
+		if name == "" || name == jid.User {
+			unresolved++
+			continue
+		}
+		if _, err := messageStore.db.Exec("UPDATE chats SET name = ? WHERE jid = ?", name, p.jid); err != nil {
+			logger.Warnf("LID backfill: falha ao renomear %s: %v", p.jid, err)
+			continue
+		}
+		renamed++
+	}
+	logger.Infof("LID backfill: %d chats @lid, %d renomeados, %d ainda sem resolucao", len(todo), renamed, unresolved)
 }
 
 // Handle history sync events

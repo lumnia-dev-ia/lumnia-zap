@@ -252,6 +252,17 @@
     Se o Mac estiver desligado na hora marcada, o envio é registrado como perdido, nunca enviado atrasado.</div>
   </div>
 
+  <!-- BEATITUDE (modulo desligado por padrao; beatitude.go) -->
+  <div class="card" id="beatitude">
+    <h2>Beatitude · o mordomo pelo WhatsApp</h2>
+    <div id="bt-wrap"><div class="empty">carregando…</div></div>
+    <div id="bt-codigo-box" style="display:none;margin-top:10px">
+      <label class="fl" for="bt-codigo">Código mostrado pelo navegador</label>
+      <div class="row" style="margin:0"><div class="field"><input id="bt-codigo" autocomplete="off"></div>
+      <button class="btn" onclick="btEnviarCodigo()">Enviar código</button></div>
+    </div>
+  </div>
+
   <div class="card">
     <details>
       <summary>Se nem este painel abrir (a ponte não subiu)</summary>
@@ -526,6 +537,171 @@ async function doUnlink() {
   setTimeout(refreshStatus, 1500);
 }
 
+
+/* ---------- Beatitude ---------- */
+let btLigado = false, btPoll = false, btConsent = false, btGrupoSel = '';
+const BT_HDR = { 'Content-Type': 'application/json', 'X-Lumnia-Painel': '1' };
+const btPost = (path, body) => api(path, { method: 'POST', headers: BT_HDR, body: JSON.stringify(body || {}) });
+
+function btPasso(n, ok, titulo, corpo) {
+  const marca = ok
+    ? '<span style="color:var(--good-ink);font-weight:700">✓</span>'
+    : `<span style="color:var(--ink-muted);font-weight:600">${n}</span>`;
+  return `<div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--hairline)">
+    <div style="width:18px;flex:none;text-align:center">${marca}</div>
+    <div style="flex:1;min-width:0"><div style="font-weight:560${ok ? ';color:var(--ink-2)' : ''}">${titulo}</div>
+    ${corpo ? `<div style="margin-top:6px;font-size:13.5px;color:var(--ink-2)">${corpo}</div>` : ''}</div></div>`;
+}
+
+async function loadBeatitude() {
+  const w = $('bt-wrap');
+  try {
+    const b = await api('/api/panel/beatitude');
+    btLigado = !!b.ligado;
+    btPoll = !!(b.instalando || b.login_ativo);
+    if (b.ligado) {
+      const runs = (b.execucoes || []).map(r =>
+        `<tr><td class="num">${esc(new Date(r.em).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}))}</td>
+         <td class="msg">${esc(r.pedido)}</td><td>${r.status === 'ok' || r.status === 'envio' ? esc(r.status === 'envio' ? 'enviado' : 'ok') + (r.erro ? '<span class="st">' + esc(r.erro) + '</span>' : '') : '<span style="color:var(--critical)">' + esc(r.erro || r.status) + '</span>'}</td></tr>`).join('');
+      const avisoLogin = (b.claude_ok && !b.claude_logado)
+        ? `<div class="note" style="margin:0 0 12px">O Claude saiu da sua conta neste Mac.
+           <button class="btn ghost" style="margin-left:auto" onclick="btEntrar(this)">Entrar de novo</button></div>` : '';
+      w.innerHTML = `${avisoLogin}
+        <div class="status" style="margin-bottom:12px">
+          <div class="state ok"><span>Ligado${b.rodando ? ' · trabalhando agora' : ''}</span></div>
+          <div class="meta"><div><b>Grupo</b>${esc(b.grupo_nome || b.grupo_jid)}</div>
+          <div><b>Conta Claude</b>${esc(b.claude_email || (b.claude_logado ? 'conectada' : '—'))}</div>
+          <div><b>Teto</b>${b.teto_por_hora} pedidos/hora</div></div>
+          <div class="spacer"></div>
+          <button class="btn danger" onclick="btDesligar()">Desligar</button>
+        </div>
+        <div id="bt-ponte" style="margin-bottom:12px"></div>
+        ${runs ? `<table><tr><th>Quando</th><th>Pedido</th><th>Resultado</th></tr>${runs}</table>`
+               : '<div class="empty">Nenhum pedido ainda. Escreva "pendentes" no grupo.</div>'}`;
+      btLoadPonte();
+      return;
+    }
+
+    const g = await api('/api/panel/beatitude/grupos');
+    const grupos = g.grupos || [];
+    if (!btGrupoSel && grupos.length) btGrupoSel = grupos[0].jid;
+
+    // passo 1: Claude Code
+    let p1 = '';
+    if (!b.claude_ok) {
+      p1 = b.instalando ? 'Instalando… leva menos de um minuto.'
+        : `<button class="btn" onclick="btInstalar(this)">Instalar o Claude</button>
+           <span class="hint" style="margin-left:8px">o Claude Code, que o mordomo usa neste Mac; não precisa de Terminal</span>
+           ${b.erro_instalacao ? `<div class="flash err" style="margin-top:6px">${esc(b.erro_instalacao)}</div>` : ''}`;
+    }
+    // passo 2: conta
+    let p2 = '';
+    if (b.claude_ok && !b.claude_logado) {
+      if (b.login_ativo) {
+        p2 = `Abrimos o navegador. Entre na sua conta Claude e clique em <b>Autorizar</b>.
+          ${b.login_url ? ` Se o navegador não abriu, <a href="${esc(b.login_url)}" target="_blank" rel="noopener">abra a página de login</a>.` : ''}`;
+      } else {
+        p2 = `<button class="btn" onclick="btEntrar(this)" ${b.claude_ok ? '' : 'disabled'}>Entrar com a minha conta Claude</button>
+          <div class="hint" style="margin-top:6px">Use a conta com assinatura <b>Pro</b> ou <b>Max</b>. O plano grátis do Claude não inclui o Claude Code, e sem ele o mordomo não roda.</div>
+          ${b.login_erro ? `<div class="flash err" style="margin-top:6px">${esc(b.login_erro)}</div>` : ''}`;
+      }
+    }
+    $('bt-codigo-box').style.display = (b.login_ativo && b.login_codigo) ? 'block' : 'none';
+    // passo 3: grupo
+    let p3 = '';
+    if (!grupos.length) {
+      p3 = `<button class="btn" onclick="btCriarGrupo(this)">Criar o grupo Beatitude</button>
+        <span class="hint" style="margin-left:8px">um grupo só com você, no seu WhatsApp</span>
+        <div class="flash err" id="bt-grupo-erro" style="margin-top:6px"></div>`;
+    } else if (grupos.length > 1) {
+      p3 = `<select id="bt-grupo" onchange="btGrupoSel=this.value">${grupos.map(x =>
+        `<option value="${esc(x.jid)}" ${x.jid === btGrupoSel ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>`;
+    }
+    const nomeGrupo = (grupos.find(x => x.jid === btGrupoSel) || {}).nome || '';
+    const pronto = b.claude_ok && b.claude_logado && grupos.length;
+
+    w.innerHTML = `
+      <p style="margin:0 0 6px;font-size:13.5px;color:var(--ink-2)">Desligado. Ligado, o seu Claude lê as suas conversas
+      <b>neste Mac</b> para preparar respostas e responde no grupo Beatitude. Para outra pessoa, só sai o rascunho
+      que você aprovar respondendo <b>envia</b> com o número. O Claude não tem como enviar nada sozinho.</p>
+      ${btPasso(1, b.claude_ok, 'Claude neste Mac', p1)}
+      ${btPasso(2, b.claude_ok && b.claude_logado, 'Sua conta Claude' + (b.claude_email ? ' · ' + esc(b.claude_email) : ''), p2)}
+      ${btPasso(3, grupos.length > 0, 'Grupo Beatitude' + (grupos.length === 1 ? ' · ' + esc(grupos[0].nome) : ''), p3)}
+      <div style="border-top:1px solid var(--hairline);padding-top:13px">
+        <label style="display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--ink-2);margin-bottom:13px">
+          <input type="checkbox" id="bt-ok" style="width:auto;margin-top:3px" ${btConsent ? 'checked' : ''} onchange="btConsent=this.checked">
+          <span>Entendo que o Claude vai ler minhas conversas do WhatsApp neste Mac quando eu pedir pelo grupo,
+          e que nada é enviado em meu nome sem eu responder "envia".</span></label>
+        <div class="actions"><button class="btn" onclick="btLigar(this, '${esc(nomeGrupo)}')" ${pronto ? '' : 'disabled'}>Ligar o Beatitude</button>
+          <span class="flash" id="bt-flash"></span></div>
+      </div>`;
+  } catch (e) {
+    w.innerHTML = `<div class="empty">Não consegui ler o estado do módulo: ${esc(e.message)}</div>`;
+  }
+}
+/* ligação com o app Beatitude (beatitude_ponte.go) */
+async function btLoadPonte() {
+  const el = $('bt-ponte');
+  if (!el || (document.activeElement && document.activeElement.id === 'bt-token')) return;
+  try {
+    const p = await api('/api/panel/beatitude/ponte');
+    if (p.pareado) {
+      const quando = (p.visto_em && !String(p.visto_em).startsWith('0001'))
+        ? new Date(p.visto_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' }) : '—';
+      el.innerHTML = `<div class="status"><div class="state ok"><span>Ligado ao app Beatitude</span></div>
+        <div class="meta"><div><b>Último contato</b>${esc(quando)}</div>
+        ${p.ultimo_erro ? `<div><b>Último erro</b>${esc(p.ultimo_erro)}</div>` : ''}</div>
+        <div class="spacer"></div><button class="btn ghost" onclick="btDesparear()">Desligar do app</button></div>`;
+    } else {
+      el.innerHTML = `<div class="note" style="margin:0 0 8px">Para o app Beatitude mandar o brief ao grupo, saber quem do seu círculo espera resposta
+        e enviar o que você aprovar com <b>sim N</b>, ligue este Mac ao app. No app, em <b>Instalar → WhatsApp</b>, toque em
+        <b>Ligar o Lumnia Zap a este Beatitude</b> e cole aqui o código que aparecer.</div>
+        <div class="actions"><input id="bt-token" placeholder="bz_…" autocomplete="off" style="flex:1;min-width:220px">
+        <button class="btn" onclick="btParear(this)">Ligar ao app</button><span class="flash" id="bt-ponte-flash"></span></div>`;
+    }
+  } catch (e) {}
+}
+async function btParear(btn) {
+  const t = ($('bt-token').value || '').trim(); const f = $('bt-ponte-flash');
+  if (!t) { f.className = 'flash err'; f.textContent = 'Cole o código do app.'; return; }
+  btn.disabled = true;
+  try { await btPost('/api/panel/beatitude/parear', { token: t }); $('bt-token').value = ''; $('bt-token').blur(); btLoadPonte(); }
+  catch (e) { f.className = 'flash err'; f.textContent = e.message; btn.disabled = false; }
+}
+async function btDesparear() {
+  try { await btPost('/api/panel/beatitude/desparear'); } catch (e) {}
+  btLoadPonte();
+}
+async function btInstalar(btn) { btn.disabled = true; try { await btPost('/api/panel/beatitude/instalar-claude'); } catch (e) {} btPoll = true; setTimeout(loadBeatitude, 800); }
+async function btEntrar(btn) { btn.disabled = true; try { await btPost('/api/panel/beatitude/entrar'); } catch (e) {} btPoll = true; setTimeout(loadBeatitude, 1500); }
+async function btEnviarCodigo() {
+  const c = $('bt-codigo').value.trim(); if (!c) return;
+  try { await btPost('/api/panel/beatitude/codigo', { codigo: c }); $('bt-codigo').value = ''; } catch (e) {}
+  setTimeout(loadBeatitude, 2000);
+}
+async function btCriarGrupo(btn) {
+  btn.disabled = true;
+  try {
+    const r = await btPost('/api/panel/beatitude/criar-grupo');
+    if (r.ok) { btGrupoSel = r.grupo_jid; loadBeatitude(); return; }
+    $('bt-grupo-erro').textContent = 'Não deu para criar daqui (' + r.erro + '). Crie no celular um grupo só com você chamado Beatitude e mande uma mensagem nele.';
+  } catch (e) { $('bt-grupo-erro').textContent = e.message; }
+  btn.disabled = false;
+}
+async function btLigar(btn, nome) {
+  const f = $('bt-flash');
+  if (!btConsent) { f.className = 'flash err'; f.textContent = 'Marque a confirmação.'; return; }
+  btn.disabled = true;
+  try {
+    await btPost('/api/panel/beatitude/ligar', { grupo_jid: btGrupoSel, grupo_nome: nome || 'Beatitude', consinto: true });
+    loadBeatitude();
+  } catch (e) { f.className = 'flash err'; f.textContent = e.message; btn.disabled = false; }
+}
+async function btDesligar() {
+  try { await btPost('/api/panel/beatitude/desligar'); } catch (e) {}
+  loadBeatitude();
+}
+
 /* ---------- início ---------- */
 function tickClock() {
   $('clock').textContent = new Date().toLocaleString('pt-BR',
@@ -539,6 +715,9 @@ function tickClock() {
   refreshStatus(); setInterval(refreshStatus, 5000);
   refreshStats();  setInterval(refreshStats, 30000);
   loadSchedules(); setInterval(loadSchedules, 60000);
+  loadBeatitude();
+  setInterval(() => { if (btPoll) loadBeatitude(); }, 2500);
+  setInterval(() => { if (!btPoll) loadBeatitude(); }, 15000);
 })();
 </script>
 </body>

@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -728,6 +729,10 @@ func extractDirectPathFromURL(url string) string {
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
 	// Handler for sending messages
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalRequest(r) { // defesa extra, alem do bind local
+			http.Error(w, "apenas localhost", http.StatusForbidden)
+			return
+		}
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -777,6 +782,10 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 	// Handler for downloading media
 	http.HandleFunc("/api/download", func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalRequest(r) { // defesa extra, alem do bind local
+			http.Error(w, "apenas localhost", http.StatusForbidden)
+			return
+		}
 		// Only allow POST requests
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -826,16 +835,25 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		})
 	})
 
-	// Start the server
-	serverAddr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
-
-	// Run server in a goroutine so it doesn't block
-	go func() {
-		if err := http.ListenAndServe(serverAddr, nil); err != nil {
-			fmt.Printf("REST API server error: %v\n", err)
+	// So no proprio Mac: escuta em 127.0.0.1 e [::1], nunca na rede.
+	// Antes era ":porta" (todas as interfaces), e /api/send ficava aberto a
+	// qualquer aparelho da mesma Wi-Fi.
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			if host == "127.0.0.1" {
+				fmt.Printf("REST API server error: %v\n", err)
+			}
+			continue // sem IPv6 local nao e problema
 		}
-	}()
+		fmt.Printf("Starting REST API server on %s...\n", addr)
+		go func(l net.Listener) {
+			if err := http.Serve(l, nil); err != nil {
+				fmt.Printf("REST API server error: %v\n", err)
+			}
+		}(ln)
+	}
 }
 
 func main() {
@@ -895,6 +913,7 @@ func main() {
 		case *events.Message:
 			// Process regular messages
 			handleMessage(client, messageStore, v, logger)
+			beatitudeOnMessage(v) // modulo Beatitude (beatitude.go); sai cedo se desligado
 			if !v.Info.IsFromMe {
 				panelNoteReceived()
 			}
@@ -923,6 +942,8 @@ func main() {
 	// Rotas e agendador do painel (panel.go) — registradas no mesmo mux
 	registerPanelRoutes()
 	startPanelScheduler()
+	initBeatitude()
+	registerBeatitudeRoutes()
 
 	// Start REST API server
 	startRESTServer(client, messageStore, 8080)

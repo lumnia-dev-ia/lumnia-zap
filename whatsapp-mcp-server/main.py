@@ -1,5 +1,6 @@
+import os
 from typing import List, Dict, Any, Optional
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from whatsapp import (
     search_contacts as whatsapp_search_contacts,
     list_messages as whatsapp_list_messages,
@@ -12,7 +13,8 @@ from whatsapp import (
     send_message as whatsapp_send_message,
     send_file as whatsapp_send_file,
     send_audio_message as whatsapp_audio_voice_message,
-    download_media as whatsapp_download_media
+    download_media as whatsapp_download_media,
+    copy_media_to_user_folder
 )
 
 # Initialize FastMCP server
@@ -221,30 +223,68 @@ def send_audio_message(recipient: str, media_path: str) -> Dict[str, Any]:
         "message": status_message
     }
 
+# Imagens que o Claude consegue ver direto quando devolvidas como conteúdo MCP.
+_INLINE_IMAGE_FORMATS = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}
+# Limite de imagem da API do Claude é 5 MB em base64 (~3,75 MB brutos).
+_INLINE_IMAGE_MAX_BYTES = 3_700_000
+
+
 @mcp.tool()
-def download_media(message_id: str, chat_jid: str) -> Dict[str, Any]:
-    """Download media from a WhatsApp message and get the local file path.
-    
+def download_media(message_id: str, chat_jid: str, include_image: bool = True) -> List[Any]:
+    """Download media from a WhatsApp message.
+
+    The file is saved in the bridge store and a copy goes to the user's
+    Downloads/LumniaZap-midia folder. When the media is an image (jpg, png,
+    gif, webp) and include_image is True, the image itself is returned as
+    content so you can see it directly, no file access needed.
+
     Args:
         message_id: The ID of the message containing the media
         chat_jid: The JID of the chat containing the message
-    
+        include_image: Return the image itself (default True). Set False to get only paths.
+
     Returns:
-        A dictionary containing success status, a status message, and the file path if successful
+        A JSON object with success, message, file_path (bridge store) and
+        user_copy_path (Downloads copy), followed by the image when applicable.
     """
     file_path = whatsapp_download_media(message_id, chat_jid)
-    
-    if file_path:
-        return {
-            "success": True,
-            "message": "Media downloaded successfully",
-            "file_path": file_path
-        }
-    else:
-        return {
+
+    if not file_path:
+        return [{
             "success": False,
             "message": "Failed to download media"
-        }
+        }]
+
+    info: Dict[str, Any] = {
+        "success": True,
+        "message": "Media downloaded successfully",
+        "file_path": file_path,
+    }
+
+    copy_path, copy_error = copy_media_to_user_folder(file_path, chat_jid)
+    if copy_path:
+        info["user_copy_path"] = copy_path
+    if copy_error:
+        info["user_copy_error"] = copy_error
+
+    content: List[Any] = [info]
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if include_image and ext in _INLINE_IMAGE_FORMATS:
+        try:
+            size = os.path.getsize(file_path)
+            if size <= _INLINE_IMAGE_MAX_BYTES:
+                with open(file_path, "rb") as f:
+                    content.append(Image(data=f.read(), format=_INLINE_IMAGE_FORMATS[ext]))
+                info["image_included"] = True
+            else:
+                info["image_included"] = False
+                info["image_note"] = f"Imagem com {size} bytes, acima do limite para envio inline; use o arquivo."
+        except OSError as e:
+            info["image_included"] = False
+            info["image_note"] = f"Não foi possível ler a imagem: {e}"
+
+    return content
 
 if __name__ == "__main__":
     # Initialize and run the server

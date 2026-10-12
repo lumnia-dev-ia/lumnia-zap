@@ -3,12 +3,24 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 import os.path
+import re
+import shutil
+import hashlib
+from pathlib import Path
 import requests
 import json
 import audio
+import sys
+
+
+def _log(*args, **kwargs):
+    """Diagnóstico vai para stderr: no transporte stdio do MCP, o stdout é
+    exclusivo do protocolo JSON-RPC e qualquer print ali corrompe a resposta."""
+    kwargs["file"] = sys.stderr
+    print(*args, **kwargs)
 
 MESSAGES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'whatsapp-bridge', 'store', 'messages.db')
-WHATSAPP_API_BASE_URL = "http://localhost:8080/api"
+WHATSAPP_API_BASE_URL = "http://127.0.0.1:8080/api"  # a ponte so escuta no proprio Mac
 
 @dataclass
 class Message:
@@ -85,7 +97,7 @@ def get_sender_name(sender_jid: str) -> str:
             return sender_jid
         
     except sqlite3.Error as e:
-        print(f"Database error while getting sender name: {e}")
+        _log(f"Database error while getting sender name: {e}")
         return sender_jid
     finally:
         if 'conn' in locals():
@@ -108,7 +120,7 @@ def format_message(message: Message, show_chat_info: bool = True) -> None:
         sender_name = get_sender_name(message.sender) if not message.is_from_me else "Me"
         output += f"From: {sender_name}: {content_prefix}{message.content}\n"
     except Exception as e:
-        print(f"Error formatting message: {e}")
+        _log(f"Error formatting message: {e}")
     return output
 
 def format_messages_list(messages: List[Message], show_chat_info: bool = True) -> None:
@@ -216,7 +228,7 @@ def list_messages(
         return format_messages_list(result, show_chat_info=True)    
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return []
     finally:
         if 'conn' in locals():
@@ -309,7 +321,7 @@ def get_message_context(
         )
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         raise
     finally:
         if 'conn' in locals():
@@ -383,7 +395,7 @@ def list_chats(
         return result
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return []
     finally:
         if 'conn' in locals():
@@ -425,7 +437,7 @@ def search_contacts(query: str) -> List[Contact]:
         return result
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return []
     finally:
         if 'conn' in locals():
@@ -476,7 +488,7 @@ def get_contact_chats(jid: str, limit: int = 20, page: int = 0) -> List[Chat]:
         return result
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return []
     finally:
         if 'conn' in locals():
@@ -525,7 +537,7 @@ def get_last_interaction(jid: str) -> str:
         return format_message(message)
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return None
     finally:
         if 'conn' in locals():
@@ -573,7 +585,7 @@ def get_chat(chat_jid: str, include_last_message: bool = True) -> Optional[Chat]
         )
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return None
     finally:
         if 'conn' in locals():
@@ -616,7 +628,7 @@ def get_direct_chat_by_contact(sender_phone_number: str) -> Optional[Chat]:
         )
         
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        _log(f"Database error: {e}")
         return None
     finally:
         if 'conn' in locals():
@@ -747,21 +759,95 @@ def download_media(message_id: str, chat_jid: str) -> Optional[str]:
             result = response.json()
             if result.get("success", False):
                 path = result.get("path")
-                print(f"Media downloaded successfully: {path}")
+                _log(f"Media downloaded successfully: {path}")
                 return path
             else:
-                print(f"Download failed: {result.get('message', 'Unknown error')}")
+                _log(f"Download failed: {result.get('message', 'Unknown error')}")
                 return None
         else:
-            print(f"Error: HTTP {response.status_code} - {response.text}")
+            _log(f"Error: HTTP {response.status_code} - {response.text}")
             return None
             
     except requests.RequestException as e:
-        print(f"Request error: {str(e)}")
+        _log(f"Request error: {str(e)}")
         return None
     except json.JSONDecodeError:
-        print(f"Error parsing response: {response.text}")
+        _log(f"Error parsing response: {response.text}")
         return None
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        _log(f"Unexpected error: {str(e)}")
         return None
+
+
+# --- Cópia das mídias para uma pasta visível ao usuário -----------------------
+#
+# O runtime da ponte fica em ~/Library/Application Support/LumniaZap (macOS) ou
+# %LOCALAPPDATA%\LumniaZap (Windows) — pastas que outras ferramentas (Cowork,
+# Finder, o próprio usuário) não alcançam com facilidade. Toda mídia baixada
+# ganha uma cópia em ~/Downloads/LumniaZap-midia. A pasta pode ser trocada pela
+# variável de ambiente LUMNIA_ZAP_MEDIA_DIR; LUMNIA_ZAP_MEDIA_DIR=off desliga.
+# O original em store/ nunca é movido nem alterado.
+
+def media_copy_dir() -> Optional[Path]:
+    """Pasta de destino das cópias, ou None se desligada."""
+    override = os.environ.get("LUMNIA_ZAP_MEDIA_DIR", "").strip()
+    if override.lower() in ("off", "0", "false", "nao", "não"):
+        return None
+    if override:
+        return Path(os.path.expanduser(override))
+    return Path.home() / "Downloads" / "LumniaZap-midia"
+
+
+def _slug(text: str, limit: int = 40) -> str:
+    text = re.sub(r"[^\w\-. ]+", "", text or "", flags=re.UNICODE).strip()
+    text = re.sub(r"\s+", "-", text)
+    return text[:limit].strip("-.") or "chat"
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def copy_media_to_user_folder(source_path: str, chat_jid: str) -> Tuple[Optional[str], Optional[str]]:
+    """Copia a mídia baixada para a pasta do usuário.
+
+    Nome do arquivo: <nome-do-chat>_<arquivo-original>. Se já existir um
+    arquivo idêntico, reaproveita; se existir um diferente com o mesmo nome,
+    acrescenta sufixo -2, -3...
+
+    Returns:
+        (caminho_da_copia, erro). Exatamente um dos dois é None — exceto
+        quando a cópia está desligada, caso em que ambos são None.
+    """
+    dest_dir = media_copy_dir()
+    if dest_dir is None:
+        return None, None
+    try:
+        src = Path(source_path)
+        chat = get_chat(chat_jid, include_last_message=False)
+        chat_label = (chat.name if chat and chat.name else chat_jid.split("@")[0])
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        base = f"{_slug(chat_label)}_{src.name}"
+        stem, suffix = os.path.splitext(base)
+        candidate = dest_dir / base
+        n = 2
+        src_hash = None
+        while candidate.exists():
+            src_hash = src_hash or _sha256(src)
+            if _sha256(candidate) == src_hash:
+                return str(candidate), None
+            candidate = dest_dir / f"{stem}-{n}{suffix}"
+            n += 1
+
+        # Copia para temporário e renomeia: nunca deixa arquivo pela metade.
+        tmp = candidate.with_name(candidate.name + ".parcial")
+        shutil.copy2(src, tmp)
+        os.replace(tmp, candidate)
+        return str(candidate), None
+    except Exception as e:  # a cópia é conveniência: nunca derruba o download
+        return None, f"{type(e).__name__}: {e}"

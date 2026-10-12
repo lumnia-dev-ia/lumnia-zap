@@ -206,8 +206,64 @@ func instalar() error {
 			"A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu "+
 			"celular em Configurações → Aparelhos conectados.\n\n"+
 			proximo+
-			"O atalho ficou na sua Mesa.", false)
+			"O atalho ficou na sua Mesa. O instalador vai para o Lixo; você não precisa mais dele.", false)
+	jogarInstaladorNoLixo(home)
 	return nil
+}
+
+// jogarInstaladorNoLixo manda o proprio "Instalador Lumnia Zap.app" (e o .zip
+// baixado ao lado dele) para o Lixo depois de uma instalacao bem-sucedida, para
+// a pessoa nao abrir de novo um instalador velho meses depois. So age quando o
+// instalador esta em Downloads ou na Mesa (nunca em /Applications nem na pasta
+// de build). Usa o NSFileManager pelo JXA: e a API oficial de Lixo, nao pede
+// permissao de Automacao do Finder nem acesso total ao disco. Se falhar, nada
+// acontece alem de uma linha no relatorio.
+func jogarInstaladorNoLixo(home string) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	// .../Instalador Lumnia Zap.app/Contents/MacOS/instalador
+	app := filepath.Clean(filepath.Join(filepath.Dir(exe), "..", ".."))
+	if !strings.HasSuffix(app, ".app") || !instaladorEmPastaDeDownload(home, app) {
+		anotar("Instalador mantido em %s (fora de Downloads/Mesa)", app)
+		return
+	}
+	alvos := []string{app}
+	if zip := filepath.Join(filepath.Dir(app), "Instalador-Lumnia-Zap.zip"); arquivoExiste(zip) {
+		alvos = append(alvos, zip)
+	}
+	for _, alvo := range alvos {
+		script := `ObjC.import("Foundation");
+var u = $.NSURL.fileURLWithPath(` + jsString(alvo) + `);
+$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError(u, null, null) ? "ok" : "falhou";`
+		out, err := exec.Command("/usr/bin/osascript", "-l", "JavaScript", "-e", script).CombinedOutput()
+		anotar("Lixo: %s → %s %v", alvo, strings.TrimSpace(string(out)), err)
+	}
+}
+
+func instaladorEmPastaDeDownload(home, app string) bool {
+	for _, pasta := range []string{"Downloads", "Desktop"} {
+		base := filepath.Join(home, pasta) + string(filepath.Separator)
+		if strings.HasPrefix(app, base) {
+			return true
+		}
+	}
+	return false
+}
+
+func arquivoExiste(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+// jsString devolve s como literal de string JavaScript (JSON e JS valido).
+func jsString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // resumoHTML e o bloco que aparece na tela de sucesso: onde o servidor MCP foi

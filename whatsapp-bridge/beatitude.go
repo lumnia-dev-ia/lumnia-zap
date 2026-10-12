@@ -954,22 +954,87 @@ func beatitudeLogin(claude string) {
 	panel.logger.Infof("Beatitude: login do Claude concluído")
 }
 
+// beatitudeCriarGrupo cria o grupo "Beatitude" so com a pessoa e CONFERE que
+// ele existe de verdade antes de dizer que deu certo: (1) se ja ha um grupo
+// Beatitude no historico, devolve esse (clique duplo nao gera dois grupos);
+// (2) cria; (3) le o grupo de volta no servidor do WhatsApp e confere que a
+// propria pessoa e participante; (4) manda a primeira mensagem, que faz o grupo
+// aparecer no topo do WhatsApp do celular. A primeira mensagem comeca com a
+// marca, entao o anti-loop a ignora. Cada passo fica no log da ponte.
 func beatitudeCriarGrupo() (string, error) {
 	if panel.client == nil || !panel.client.IsConnected() || !panel.client.IsLoggedIn() {
 		return "", fmt.Errorf("o WhatsApp não está conectado")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if jid := beatitudeGrupoExistente(); jid != "" {
+		panel.logger.Infof("Beatitude: grupo já existia (%s); não criei outro", jid)
+		return jid, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	info, err := panel.client.CreateGroup(ctx, whatsmeow.ReqCreateGroup{Name: "Beatitude"})
 	if err != nil {
-		return "", err
+		panel.logger.Warnf("Beatitude: criar grupo falhou: %v", err)
+		return "", fmt.Errorf("o WhatsApp recusou a criação: %v", err)
 	}
 	jid := info.JID.String()
-	go beatitudePorIcone(jid)
+	panel.logger.Infof("Beatitude: grupo criado %s; conferindo no servidor", jid)
+
+	// conferencia: o grupo precisa existir no servidor com a pessoa dentro
+	var conferido bool
+	var ultimo error
+	for tentativa := 0; tentativa < 3 && !conferido; tentativa++ {
+		if tentativa > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		gi, gerr := panel.client.GetGroupInfo(ctx, info.JID)
+		if gerr != nil {
+			ultimo = gerr
+			continue
+		}
+		eu := panel.client.Store.ID
+		for _, p := range gi.Participants {
+			if eu != nil && (p.JID.User == eu.User || (!p.LID.IsEmpty() && panel.client.Store.LID.User == p.LID.User)) {
+				conferido = true
+				break
+			}
+		}
+		if !conferido {
+			ultimo = fmt.Errorf("o grupo existe, mas você não aparece entre os participantes")
+		}
+	}
+	if !conferido {
+		panel.logger.Warnf("Beatitude: grupo %s não conferiu: %v", jid, ultimo)
+		return "", fmt.Errorf("criei o grupo, mas não consegui confirmar no WhatsApp (%v)", ultimo)
+	}
+
 	if panel.store != nil {
 		_ = panel.store.StoreChat(jid, "Beatitude", time.Now())
 	}
+	boasVindas := beatitudeMarca + "\nEste grupo é só seu. Escreva ou mande um áudio com o que precisa; a resposta chega aqui."
+	if ok, msg := sendWhatsAppMessage(panel.client, jid, boasVindas, ""); ok {
+		recordAPISend(jid, "beatitude")
+		if panel.store != nil {
+			_ = panel.store.StoreMessage(fmt.Sprintf("beatitude-%d", time.Now().UnixNano()), jid, "",
+				boasVindas, time.Now(), true, "", "", "", nil, nil, nil, 0)
+		}
+	} else {
+		panel.logger.Warnf("Beatitude: grupo criado, mas a primeira mensagem falhou: %s", msg)
+	}
+	go beatitudePorIcone(jid)
+	panel.logger.Infof("Beatitude: grupo %s conferido e pronto", jid)
 	return jid, nil
+}
+
+// beatitudeGrupoExistente devolve o grupo "Beatitude" mais recente do
+// historico local, se houver.
+func beatitudeGrupoExistente() string {
+	if panel.store == nil {
+		return ""
+	}
+	var jid string
+	_ = panel.store.db.QueryRow(
+		`SELECT jid FROM chats WHERE jid LIKE '%@g.us' AND lower(COALESCE(name,'')) = 'beatitude' ORDER BY last_message_time DESC LIMIT 1`).Scan(&jid)
+	return jid
 }
 
 func registerBeatitudePreparoRoutes() {

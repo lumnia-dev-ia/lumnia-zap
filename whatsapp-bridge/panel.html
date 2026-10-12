@@ -626,7 +626,7 @@ async function loadBeatitude() {
       que você aprovar respondendo <b>envia</b> com o número. O Claude não tem como enviar nada sozinho.</p>
       ${btPasso(1, b.claude_ok, 'Claude neste Mac', p1)}
       ${btPasso(2, b.claude_ok && b.claude_logado, 'Sua conta Claude' + (b.claude_email ? ' · ' + esc(b.claude_email) : ''), p2)}
-      ${btPasso(3, grupos.length > 0, 'Grupo Beatitude' + (grupos.length === 1 ? ' · ' + esc(grupos[0].nome) : ''), p3)}
+      ${btPasso(3, grupos.length > 0, 'Grupo Beatitude' + (grupos.length === 1 ? ' · ' + esc(grupos[0].nome) : ''), p3 + (btGrupoCriado && grupos.length ? '<div class="hint" style="margin-top:6px">Grupo criado e conferido no WhatsApp. Ele já aparece no seu celular, com uma primeira mensagem.</div>' : ''))}
       <div style="border-top:1px solid var(--hairline);padding-top:13px">
         <label style="display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--ink-2);margin-bottom:13px">
           <input type="checkbox" id="bt-ok" style="width:auto;margin-top:3px" ${btConsent ? 'checked' : ''} onchange="btConsent=this.checked">
@@ -679,11 +679,12 @@ async function btEnviarCodigo() {
   try { await btPost('/api/panel/beatitude/codigo', { codigo: c }); $('bt-codigo').value = ''; } catch (e) {}
   setTimeout(loadBeatitude, 2000);
 }
+let btGrupoCriado = false;
 async function btCriarGrupo(btn) {
   btn.disabled = true;
   try {
     const r = await btPost('/api/panel/beatitude/criar-grupo');
-    if (r.ok) { btGrupoSel = r.grupo_jid; loadBeatitude(); return; }
+    if (r.ok) { btGrupoSel = r.grupo_jid; btGrupoCriado = true; loadBeatitude(); return; }
     $('bt-grupo-erro').textContent = 'Não deu para criar daqui (' + r.erro + '). Crie no celular um grupo só com você chamado Beatitude e mande uma mensagem nele.';
   } catch (e) { $('bt-grupo-erro').textContent = e.message; }
   btn.disabled = false;

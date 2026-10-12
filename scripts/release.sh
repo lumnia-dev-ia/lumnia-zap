@@ -137,11 +137,46 @@ if feito app.built; then pulou; else
 </plist>
 PLIST
   printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
+
+  # Atalho da Mesa ("Lumnia Zap.app"): binario proprio, assinado e notarizado
+  # junto com o instalador, que so o copia. Antes era um script montado na
+  # maquina da pessoa, sem assinatura, e o Gatekeeper do macOS 15+ o barrava.
+  ATALHO="$BUNDLE/Contents/Helpers/Lumnia Zap.app"
+  mkdir -p "$ATALHO/Contents/MacOS" "$ATALHO/Contents/Resources"
+  cd "$RAIZ/launcher"
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$ATALHO/Contents/MacOS/zap" .
+  chmod +x "$ATALHO/Contents/MacOS/zap"
+  cp "$RAIZ/painel.icns" "$ATALHO/Contents/Resources/painel.icns"
+  cat > "$ATALHO/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key><string>Lumnia Zap</string>
+	<key>CFBundleDisplayName</key><string>Lumnia Zap</string>
+	<key>CFBundleIdentifier</key><string>dev.lumnia.zap.launcher</string>
+	<key>CFBundleExecutable</key><string>zap</string>
+	<key>CFBundleIconFile</key><string>painel</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>$VERSAO</string>
+	<key>CFBundleVersion</key><string>$VERSAO</string>
+	<key>LSUIElement</key><true/>
+	<key>NSHighResolutionCapable</key><true/>
+	<key>LSMinimumSystemVersion</key><string>12.0</string>
+</dict>
+</plist>
+PLIST
+  printf 'APPL????' > "$ATALHO/Contents/PkgInfo"
   marcar app.built
 fi
 
 say "4/7  Assinando o instalador"
 if feito app.signed; then pulou; else
+  # de dentro para fora: o atalho, o executavel do instalador, o bundle
+  ATALHO="$BUNDLE/Contents/Helpers/Lumnia Zap.app"
+  [ -d "$ATALHO" ] || falhar "atalho não montado (rode com --fresh)"
+  codesign --force --options runtime --timestamp --sign "$IDENTIDADE" "$ATALHO/Contents/MacOS/zap"
+  codesign --force --options runtime --timestamp --sign "$IDENTIDADE" "$ATALHO"
   codesign --force --options runtime --timestamp --sign "$IDENTIDADE" "$BUNDLE/Contents/MacOS/instalador"
   codesign --force --options runtime --timestamp --sign "$IDENTIDADE" "$BUNDLE"
   codesign --verify --deep --strict "$BUNDLE" && echo "     assinatura válida"
@@ -178,6 +213,11 @@ rm -f "$DIST/bridge-notarize.zip" "$DIST/app-notarize.zip"
 
 echo "     verificação final:"
 spctl --assess --type execute --verbose=2 "$BUNDLE" 2>&1 | sed 's/^/       /'
+spctl --assess --type execute --verbose=2 "$BUNDLE/Contents/Helpers/Lumnia Zap.app" 2>&1 | sed 's/^/       /'
+# a ponte precisa sair com o modulo Beatitude (a 1.0.3 saiu sem)
+strings "$DIST/whatsapp-bridge" | grep -q "api/panel/beatitude" \
+  || falhar "a ponte compilada não tem o módulo Beatitude"
+echo "       módulo Beatitude presente na ponte"
 xcrun stapler validate "$BUNDLE" 2>&1 | sed 's/^/       /'
 
 # ----------------------------------------------------------------- 4. pacotes

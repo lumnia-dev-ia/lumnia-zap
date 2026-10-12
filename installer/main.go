@@ -138,6 +138,14 @@ func instalar() error {
 	}
 	anotar("uv em uso: %s", uv)
 
+	// Claude Code (linha de comando) para o modulo Beatitude da ponte. Aditivo:
+	// se falhar, o Zap funciona igual e o painel oferece instalar depois.
+	if claudeCode, err := garantirClaudeCode(home); err != nil {
+		anotar("Claude Code: não instalado agora (%v); o painel oferece depois", err)
+	} else {
+		anotar("Claude Code em uso: %s", claudeCode)
+	}
+
 	etapa(4)
 	var avisoCodex string
 	var claudesCfg []string
@@ -580,6 +588,33 @@ func garantirUV(home string) (string, error) {
 	return uv, nil
 }
 
+// garantirClaudeCode instala o Claude Code (CLI) se ainda nao houver. E o que
+// o modulo Beatitude da ponte chama, sem tela, para atender pedidos do grupo.
+// O login fica para o painel (um clique, abre o navegador).
+func garantirClaudeCode(home string) (string, error) {
+	candidatos := []string{
+		filepath.Join(home, ".local", "bin", "claude"),
+		filepath.Join(home, ".claude", "local", "claude"),
+		"/opt/homebrew/bin/claude",
+		"/usr/local/bin/claude",
+	}
+	for _, c := range candidatos {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c, nil
+		}
+	}
+	cmd := exec.Command("/bin/bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	claude := filepath.Join(home, ".local", "bin", "claude")
+	if _, err := os.Stat(claude); err != nil {
+		return "", fmt.Errorf("claude não apareceu em %s", claude)
+	}
+	return claude, nil
+}
+
 // ------------------------------------------------------------------ Claude
 
 const arquivoConfigClaude = "claude_desktop_config.json"
@@ -888,9 +923,43 @@ func ultimasLinhas(caminho string, n int) string {
 
 // ------------------------------------------------------------------ atalho
 
+// atalhoAssinado devolve o "Lumnia Zap.app" que o release.sh compila, assina
+// e coloca dentro do proprio instalador (Contents/Helpers). Vazio quando o
+// instalador roda fora do .app (desenvolvimento).
+func atalhoAssinado() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	app := filepath.Join(filepath.Dir(exe), "..", "Helpers", produto+".app")
+	if st, err := os.Stat(filepath.Join(app, "Contents", "MacOS", "zap")); err == nil && !st.IsDir() {
+		return filepath.Clean(app)
+	}
+	return ""
+}
+
 func criarAtalho(home, destino string) error {
 	app := filepath.Join(home, "Desktop", produto+".app")
 	_ = os.RemoveAll(app)
+
+	// Caminho normal: copiar o atalho assinado e notarizado. O ditto preserva a
+	// assinatura; o Gatekeeper aceita mesmo com a marca de procedencia que o
+	// macOS poe em tudo o que o instalador escreve.
+	if src := atalhoAssinado(); src != "" {
+		if out, err := exec.Command("/usr/bin/ditto", src, app).CombinedOutput(); err == nil {
+			anotar("Atalho assinado copiado de %s", src)
+			return nil
+		} else {
+			anotar("Atalho assinado: falha ao copiar (%v: %s); usando o atalho de script", err, strings.TrimSpace(string(out)))
+			_ = os.RemoveAll(app)
+		}
+	}
+
+	// Reserva (instalador fora do .app): atalho de script, sem assinatura. No
+	// macOS 15+ o Gatekeeper pode barrar este; o painel continua em localhost:8080.
 	if err := os.MkdirAll(filepath.Join(app, "Contents", "MacOS"), 0o755); err != nil {
 		return err
 	}

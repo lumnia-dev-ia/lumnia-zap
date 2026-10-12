@@ -215,7 +215,7 @@ echo "     verificação final:"
 spctl --assess --type execute --verbose=2 "$BUNDLE" 2>&1 | sed 's/^/       /'
 spctl --assess --type execute --verbose=2 "$BUNDLE/Contents/Helpers/Lumnia Zap.app" 2>&1 | sed 's/^/       /'
 # a ponte precisa sair com o modulo Beatitude (a 1.0.3 saiu sem)
-strings "$DIST/whatsapp-bridge" | grep -q "api/panel/beatitude" \
+grep -aq "api/panel/beatitude" "$DIST/whatsapp-bridge" \
   || falhar "a ponte compilada não tem o módulo Beatitude"
 echo "       módulo Beatitude presente na ponte"
 xcrun stapler validate "$BUNDLE" 2>&1 | sed 's/^/       /'

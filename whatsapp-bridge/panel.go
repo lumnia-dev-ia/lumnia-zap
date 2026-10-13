@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,26 @@ import (
 
 //go:embed panel.html
 var panelHTML []byte
+
+// versao e gravada na compilacao pelo release.sh (-ldflags "-X main.versao=1.0.5").
+// Sem ela (go build manual, ponte trocada a mao), vale o arquivo VERSION que o
+// instalador deixa na pasta acima do binario.
+var versao = ""
+
+func versaoPonte() string {
+	if versao != "" {
+		return versao
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(exe)), "VERSION"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
 
 // Limite deliberado: uso pessoal. Vale para envios do painel e do agendador.
 const panelHourlyLimit = 30
@@ -547,6 +568,7 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 		"needs_pair":  qrActive || (client != nil && client.Store.ID == nil),
 		"number":      number,
 		"uptime_secs": int(time.Since(startedAt).Seconds()),
+		"version":     versaoPonte(),
 	}
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())

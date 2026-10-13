@@ -96,7 +96,7 @@ aguardar() {
 say "1/7  Compilando a ponte"
 if feito bridge.built; then pulou; else
   cd "$RAIZ/whatsapp-bridge"
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$DIST/whatsapp-bridge" .
+  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-X main.versao=$VERSAO" -o "$DIST/whatsapp-bridge" .
   echo "     $(du -h "$DIST/whatsapp-bridge" | cut -f1)"
   marcar bridge.built
 fi

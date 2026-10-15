@@ -516,3 +516,21 @@ func TestPonteAgendaCorpoEDeposito(t *testing.T) {
 		t.Errorf("devia esperar a cadencia, chamadas=%d", chamadas)
 	}
 }
+
+func TestPonteAgendaCorpoLimites(t *testing.T) {
+	longo := strings.Repeat("x", 300)
+	conv := make([]string, 30)
+	for i := range conv {
+		conv[i] = longo
+	}
+	ev := agendaEvento{Titulo: longo, Calendario: longo, Local: longo, Quando: longo, Convidados: conv, Notas: "segredo", UID: "u"}
+	corpo := ponteAgendaCorpo([]agendaEvento{ev}, time.Now(), time.Now())
+	lista := corpo["eventos"].([]ponteEventoAgenda)
+	e := lista[0]
+	if len([]rune(e.Titulo)) > 200 || len([]rune(e.Calendario)) > 200 || len([]rune(e.Local)) > 200 || len([]rune(e.Quando)) > 80 {
+		t.Errorf("campos acima do limite do servidor: %d %d %d %d", len([]rune(e.Titulo)), len([]rune(e.Calendario)), len([]rune(e.Local)), len([]rune(e.Quando)))
+	}
+	if len(e.Convidados) != 20 || len([]rune(e.Convidados[0])) > 80 {
+		t.Errorf("convidados: %d, primeiro com %d runas", len(e.Convidados), len([]rune(e.Convidados[0])))
+	}
+}

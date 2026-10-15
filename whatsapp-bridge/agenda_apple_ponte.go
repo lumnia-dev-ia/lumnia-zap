@@ -61,12 +61,26 @@ type ponteEventoAgenda struct {
 
 // ponteAgendaCorpo monta o que vai ao servidor: sem notas, sem UID.
 func ponteAgendaCorpo(evs []agendaEvento, de, ate time.Time) map[string]interface{} {
+	// Limites do servidor (corpo_invalido acima deles): 200 em titulo,
+	// calendario e local; 80 em quando; ate 20 convidados de 80. Cortar aqui
+	// e melhor que perder o deposito inteiro por um titulo comprido.
 	lista := make([]ponteEventoAgenda, 0, len(evs))
 	for _, ev := range evs {
+		conv := make([]string, 0, len(ev.Convidados))
+		for _, c := range ev.Convidados {
+			if len(conv) >= 20 {
+				break
+			}
+			conv = append(conv, beatitudeCurto(c, 79))
+		}
 		lista = append(lista, ponteEventoAgenda{
-			Titulo: ev.Titulo, Inicio: ev.Inicio, Fim: ev.Fim, Quando: ev.Quando, DiaInteiro: ev.DiaInteiro,
-			Calendario: ev.Calendario, Local: ev.Local, Convidados: ev.Convidados, Beatitude: ev.Beatitude,
+			Titulo: beatitudeCurto(ev.Titulo, 199), Inicio: ev.Inicio, Fim: ev.Fim, Quando: beatitudeCurto(ev.Quando, 79),
+			DiaInteiro: ev.DiaInteiro, Calendario: beatitudeCurto(ev.Calendario, 199), Local: beatitudeCurto(ev.Local, 199),
+			Convidados: conv, Beatitude: ev.Beatitude,
 		})
+		if len(lista) >= 500 {
+			break
+		}
 	}
 	return map[string]interface{}{
 		"fonte":   "apple",

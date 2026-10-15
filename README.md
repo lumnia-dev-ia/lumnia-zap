@@ -120,6 +120,17 @@ default_tools_approval_mode = "prompt"   # tudo pede aprovação
 servidor MCP, conforme as permissões que você der na conversa — o instalador
 não muda nada nesse comportamento.
 
+### Atualizar
+
+O painel confere no GitHub, uma vez a cada seis horas, se há versão nova. Quando
+há, aparece **"atualizar para vX.Y.Z"** ao lado da versão, no topo do painel.
+Um clique: a ponte baixa o mesmo pacote que o instalador usa, troca os arquivos
+e reinicia sozinha em menos de um minuto. O WhatsApp continua vinculado; o
+`store/` (sessão, mensagens, configurações, senha da agenda) não é tocado. O
+binário anterior fica em `whatsapp-bridge/whatsapp-bridge.anterior` para voltar
+atrás. Rodar o instalador de novo continua funcionando, e é o caminho se a ponte
+não estiver no ar.
+
 ### Agenda da Apple (iCloud) — opcional
 
 Quem vive no calendário do iPhone pode ligar o Zap à agenda do iCloud. A

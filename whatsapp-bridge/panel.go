@@ -574,6 +574,8 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if a := agendaResumoStatus(); a != nil {
 		resp["agenda_apple"] = a
 	}
+	go atualizacaoVerificar(false) // confere no GitHub no maximo a cada 6 h; nunca segura o status
+	resp["atualizacao"] = atualizacaoResumo()
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())
 	}

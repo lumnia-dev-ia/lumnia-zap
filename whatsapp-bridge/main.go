@@ -947,6 +947,9 @@ func main() {
 	// Agenda da Apple (agenda_apple.go): inerte sem store/apple.json
 	initAgendaApple()
 	registerAgendaRoutes()
+	// Atualizacao pelo painel (atualizacao.go)
+	initAtualizacao()
+	registerAtualizacaoRoutes()
 
 	// Start REST API server
 	startRESTServer(client, messageStore, 8080)

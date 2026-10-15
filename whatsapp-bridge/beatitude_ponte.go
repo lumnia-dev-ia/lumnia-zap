@@ -343,15 +343,21 @@ func ponteEnviarRetrato() {
 
 	lista := []pontePendente{}
 	for _, c := range chats {
-		var ultimaMinha *time.Time
-		_ = panel.store.db.QueryRow(`SELECT MAX(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 1`, c).Scan(&ultimaMinha)
-		var desde *time.Time
-		if ultimaMinha != nil {
-			_ = panel.store.db.QueryRow(`SELECT MIN(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 0 AND timestamp > ?`, c, *ultimaMinha).Scan(&desde)
+		// MAX()/MIN() de uma coluna TIMESTAMP voltam como TEXTO (a agregacao
+		// perde o tipo declarado e o driver nao parseia): ler por ponteTempoSQL.
+		// Ate 15-10 o Scan direto em *time.Time falhava em silencio e o
+		// retrato saia sempre vazio.
+		var bruto interface{}
+		_ = panel.store.db.QueryRow(`SELECT MAX(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 1`, c).Scan(&bruto)
+		ultimaMinha, temMinha := ponteTempoSQL(bruto)
+		bruto = nil
+		if temMinha {
+			_ = panel.store.db.QueryRow(`SELECT MIN(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 0 AND timestamp > ?`, c, ultimaMinha).Scan(&bruto)
 		} else {
-			_ = panel.store.db.QueryRow(`SELECT MIN(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 0 AND timestamp >= ?`, c, limite).Scan(&desde)
+			_ = panel.store.db.QueryRow(`SELECT MIN(timestamp) FROM messages WHERE chat_jid = ? AND is_from_me = 0 AND timestamp >= ?`, c, limite).Scan(&bruto)
 		}
-		if desde == nil || desde.Before(limite) {
+		desde, temDesde := ponteTempoSQL(bruto)
+		if !temDesde || desde.Before(limite) {
 			continue
 		}
 		tel := ponteTelefoneDoChat(c)
@@ -524,16 +530,16 @@ func ponteEntregar(a ponteAcaoPreparar, texto string) {
 	}
 }
 
-func ponteRodarPreparo(claude string, a ponteAcaoPreparar, chat string) (string, error) {
+func ponteRodarPreparo(claude string, a ponteAcaoPreparar, chat string) (string, beatitudeMedida, error) {
 	_ = os.MkdirAll(beatitudeWorkDir, 0o700)
 	mcp, err := beatitudeMCPConfig()
 	if err != nil {
-		return "", err
+		return "", beatitudeMedida{}, err
 	}
 	prompt := fmt.Sprintf("Pedido: %s.\nConversa: chat_jid %s (contato: %s).\n"+
 		"Leia as últimas 20 mensagens dessa conversa com mcp__lumnia-zap__list_messages e escreva a resposta.",
 		ponteTituloAcao(a.Pedido, a.Destino), chat, ponteNomeDestino(a.Destino))
-	return beatitudeExecClaude(claude, prompt, ponteSistemaPreparo(),
+	return beatitudeExecClaudeMedido(claude, prompt, ponteSistemaPreparo(),
 		[]string{"--mcp-config", mcp, "--strict-mcp-config"},
 		ponteFerramentasPreparo, beatitudeFerramentasNegadas, ponteTimeoutClaude)
 }
@@ -551,16 +557,18 @@ func ponteTentarPreparar(claude string, a ponteAcaoPreparar) bool {
 		return false
 	}
 	inicio := time.Now()
-	texto, err := ponteRodarPreparo(claude, a, chat)
+	texto, m, err := ponteRodarPreparo(claude, a, chat)
+	m.ClaudeMs = time.Since(inicio).Milliseconds()
+	m.TotalMs = m.ClaudeMs
 	if err != nil || !ponteRascunhoValido(texto) {
 		motivo := "rascunho vazio ou longo demais"
 		if err != nil {
 			motivo = err.Error()
 		}
-		beatitudeRegistrar(inicio, "preparar: "+ponteTituloAcao(a.Pedido, a.Destino), "", "erro", motivo)
+		beatitudeRegistrarMedido(inicio, "preparar: "+ponteTituloAcao(a.Pedido, a.Destino), "", "erro", motivo, &m)
 		return true
 	}
-	beatitudeRegistrar(inicio, "preparar: "+ponteTituloAcao(a.Pedido, a.Destino), "rascunho entregue ao app", "ok", "")
+	beatitudeRegistrarMedido(inicio, "preparar: "+ponteTituloAcao(a.Pedido, a.Destino), "rascunho entregue ao app", "ok", "", &m)
 	ponteEntregar(a, strings.TrimSpace(texto))
 	return true
 }

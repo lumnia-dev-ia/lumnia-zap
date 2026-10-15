@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,8 +46,11 @@ const (
 	beatitudeMarca        = "◆ Beatitude"
 	beatitudeConfigPath   = "store/beatitude.json"
 	beatitudeWorkDir      = "store/beatitude-trabalho"
-	beatitudeDebounce     = 6 * time.Second
+	beatitudeDebounce     = 2500 * time.Millisecond // era 6 s; medido em 15-10: espera de 6,5–9,5 s por pedido
 	beatitudeTimeout      = 8 * time.Minute
+	beatitudeModeloPadrao = "sonnet" // o mordomo acha conversa, resume e escreve rascunho curto; "pensa melhor" no pedido chama o opus
+	beatitudeModeloForte  = "opus"
+	beatitudeMCPURL       = "https://beatitude.lumnia.dev/mcp"
 	beatitudeMaxPorHora   = 15
 	beatitudeJanelaAtraso = 6 * time.Hour // pedido mais velho que isso (Mac dormindo) e ignorado
 	beatitudeMaxChars     = 3500          // por mensagem enviada ao grupo
@@ -102,6 +106,8 @@ type beatitudeConfig struct {
 	GrupoJID     string    `json:"grupo_jid"`
 	GrupoNome    string    `json:"grupo_nome"`
 	ClaudePath   string    `json:"claude_path,omitempty"` // opcional: sobrepoe a busca automatica
+	Modelo       string    `json:"modelo,omitempty"`      // sonnet (padrao) | opus; vazio = padrao
+	ModoRapido   bool      `json:"modo_rapido"`           // --strict-mcp-config: so Zap + Beatitude, sem os outros MCPs da conta (ver beatitudeMCPConfig)
 	ConsentidoEm time.Time `json:"consentido_em"`
 	UltimoPedido time.Time `json:"ultimo_pedido"` // timestamp do ultimo pedido ja processado
 }
@@ -124,6 +130,59 @@ var beatitude struct {
 	negadas string // ferramentas negadas na ultima execucao (diagnostico)
 }
 
+// beatitudeMedida — onde o tempo de um pedido foi parar. Tudo em
+// milissegundos. Os campos "Modelo*" vem do proprio JSON do `claude -p`
+// (duration_ms, duration_api_ms, num_turns, usage, modelUsage); os outros
+// sao medidos pela ponte. Leitura aproximada:
+//
+//	espera      = do carimbo da mensagem ate a ponte comecar (debounce + fila)
+//	transcricao = faster-whisper (so audio)
+//	claude      = processo inteiro do `claude -p`, da subida ao fim
+//	subida      ≈ claude - modelo_total   (Node + conexao com os MCPs)
+//	ferramentas ≈ modelo_total - api      (tempo fora do modelo: MCPs rodando)
+//	api         = tempo dentro do modelo (todas as rodadas)
+//	entrega     = partir e mandar ao grupo
+//	total       = do carimbo da mensagem a ultima entrega
+type beatitudeMedida struct {
+	EsperaMs      int64   `json:"espera_ms"`
+	TranscricaoMs int64   `json:"transcricao_ms"`
+	ClaudeMs      int64   `json:"claude_ms"`
+	ModeloMs      int64   `json:"modelo_ms"` // duration_ms do claude -p
+	ApiMs         int64   `json:"api_ms"`    // duration_api_ms
+	EntregaMs     int64   `json:"entrega_ms"`
+	TotalMs       int64   `json:"total_ms"`
+	Turnos        int     `json:"turnos"`
+	TokensEntrada int64   `json:"tokens_entrada"`
+	TokensCache   int64   `json:"tokens_cache"`
+	TokensSaida   int64   `json:"tokens_saida"`
+	CustoUSD      float64 `json:"custo_usd"`
+	Modelo        string  `json:"modelo"`
+	Sessao        string  `json:"sessao,omitempty"`
+}
+
+// SubidaMs e FerramentasMs sao derivados; ficam negativos em zero quando o
+// JSON nao trouxe os campos (versao antiga do Claude Code).
+func (m beatitudeMedida) SubidaMs() int64 {
+	if m.ClaudeMs <= 0 || m.ModeloMs <= 0 || m.ClaudeMs < m.ModeloMs {
+		return 0
+	}
+	return m.ClaudeMs - m.ModeloMs
+}
+
+func (m beatitudeMedida) FerramentasMs() int64 {
+	if m.ModeloMs <= 0 || m.ApiMs <= 0 || m.ModeloMs < m.ApiMs {
+		return 0
+	}
+	return m.ModeloMs - m.ApiMs
+}
+
+func (m beatitudeMedida) String() string {
+	s := func(ms int64) string { return fmt.Sprintf("%.1fs", float64(ms)/1000) }
+	return fmt.Sprintf("total=%s espera=%s transcricao=%s subida≈%s ferramentas≈%s modelo=%s turnos=%d tokens=%d/%d/%d custo=$%.4f modelo=%s",
+		s(m.TotalMs), s(m.EsperaMs), s(m.TranscricaoMs), s(m.SubidaMs()), s(m.FerramentasMs()), s(m.ApiMs),
+		m.Turnos, m.TokensEntrada, m.TokensCache, m.TokensSaida, m.CustoUSD, m.Modelo)
+}
+
 // ---------------------------------------------------------------- ciclo de vida
 
 func initBeatitude() {
@@ -141,14 +200,31 @@ func initBeatitude() {
 		if err != nil && panel.logger != nil {
 			panel.logger.Warnf("Beatitude: falha ao criar tabela: %v", err)
 		}
+		// Medicao (15-10): colunas novas em bancos antigos. O erro "duplicate
+		// column" e esperado quando ja existem; qualquer outro vai ao log.
+		for _, col := range []string{
+			"espera_ms INTEGER", "transcricao_ms INTEGER", "claude_ms INTEGER", "modelo_ms INTEGER",
+			"api_ms INTEGER", "entrega_ms INTEGER", "total_ms INTEGER", "turnos INTEGER",
+			"tokens_entrada INTEGER", "tokens_cache INTEGER", "tokens_saida INTEGER",
+			"custo_usd REAL", "modelo TEXT",
+		} {
+			if _, err := panel.store.db.Exec("ALTER TABLE beatitude_runs ADD COLUMN " + col); err != nil &&
+				!strings.Contains(err.Error(), "duplicate column") && panel.logger != nil {
+				panel.logger.Warnf("Beatitude: falha ao acrescentar coluna %s: %v", col, err)
+			}
+		}
 	}
 	initBeatitudeExtras()
 	initBeatitudeNavegador()
 	initBeatitudePonte()
 	beatitude.mu.Lock()
-	defer beatitude.mu.Unlock()
 	if b, err := os.ReadFile(beatitudeConfigPath); err == nil {
 		_ = json.Unmarshal(b, &beatitude.cfg)
+	}
+	ligado := beatitude.cfg.Ligado
+	beatitude.mu.Unlock()
+	if ligado {
+		beatitudeTranscritorAquecer() // passo 6: modelo de voz carregado antes do primeiro audio
 	}
 }
 
@@ -271,6 +347,12 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	grupo := beatitude.cfg.GrupoJID
 	beatitude.mu.Unlock()
 
+	// Medicao: a espera conta do carimbo da PRIMEIRA mensagem do lote (o
+	// WhatsApp carimba em segundos inteiros, entao ha ate 1 s de folga).
+	var medida beatitudeMedida
+	primeiro := pedidos[0].Hora
+	medida.EsperaMs = time.Since(primeiro).Milliseconds()
+
 	var textos []string
 	for _, p := range pedidos {
 		if p.Navegador > 0 {
@@ -279,7 +361,9 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 		}
 		if p.Audio {
 			beatitudeSend(beatitudeMarca + ": ouvindo o áudio…")
+			t0 := time.Now()
 			t, err := beatitudeTranscrever(grupo, p.ID)
+			medida.TranscricaoMs += time.Since(t0).Milliseconds()
 			if err != nil {
 				beatitudeSend(beatitudeMarca + ": " + beatitudeCurto(err.Error(), 200) + ". Se puder, escreva o pedido.")
 				continue
@@ -312,13 +396,20 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	inicio := time.Now()
 	beatitudeSend(beatitudeMarca + ": recebi. Estou olhando e já volto aqui.")
 
-	resposta, err := beatitudeRodarClaude(claude, pedido)
+	t0 := time.Now()
+	resposta, m, err := beatitudeRodarClaude(claude, pedido)
+	medida.ClaudeMs = time.Since(t0).Milliseconds()
+	medida.ModeloMs, medida.ApiMs, medida.Turnos = m.ModeloMs, m.ApiMs, m.Turnos
+	medida.TokensEntrada, medida.TokensCache, medida.TokensSaida = m.TokensEntrada, m.TokensCache, m.TokensSaida
+	medida.CustoUSD, medida.Modelo, medida.Sessao = m.CustoUSD, m.Modelo, m.Sessao
 	if err != nil {
 		panel.logger.Warnf("Beatitude: falha na execucao: %v", err)
 		beatitudeSend(beatitudeMarca + ": não consegui terminar desta vez (" + beatitudeCurto(err.Error(), 160) + "). Tente de novo em alguns minutos.")
-		beatitudeRegistrar(inicio, pedido, "", "erro", err.Error())
+		medida.TotalMs = time.Since(primeiro).Milliseconds()
+		beatitudeRegistrarMedido(inicio, pedido, "", "erro", err.Error(), &medida)
 		return
 	}
+	t1 := time.Now()
 	resposta, propostaNav := beatitudeSepararNavegador(resposta)
 	visivel, rascunhos := beatitudeSepararRascunhos(resposta, grupo)
 	if visivel != "" {
@@ -334,14 +425,16 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	if propostaNav != "" {
 		beatitudeSend(beatitudeMarca + "\n\n" + propostaNav)
 	}
+	medida.EntregaMs = time.Since(t1).Milliseconds()
+	medida.TotalMs = time.Since(primeiro).Milliseconds()
 	beatitude.mu.Lock()
 	neg := beatitude.negadas
 	beatitude.negadas = ""
 	beatitude.mu.Unlock()
-	beatitudeRegistrar(inicio, pedido, resposta, "ok", neg)
+	beatitudeRegistrarMedido(inicio, pedido, resposta, "ok", neg, &medida)
 }
 
-func beatitudeRodarClaude(claude, pedido string) (string, error) {
+func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error) {
 	_ = os.MkdirAll(beatitudeWorkDir, 0o700)
 
 	beatitude.mu.Lock()
@@ -367,9 +460,10 @@ func beatitudeRodarClaude(claude, pedido string) (string, error) {
 		"Drive: só leitura, para achar e resumir arquivos.",
 		"Navegador: você não usa o navegador neste passo. Se o pedido exigir um site (cadastro, reserva, formulário, consulta que pede login), NÃO tente; no fim da resposta proponha um bloco <navegador>{\"tarefa\":\"descrição completa e autocontida: site, o que fazer, quais dados dela usar e onde parar\"}</navegador>. A ponte mostra a tarefa e pede autorização; outro passo, com o Chrome, executa. Um bloco por resposta. Não escreva instruções de autorização no texto visível.",
 		"O pedido pode vir de um áudio transcrito: corrija o que a transcrição erra. \"arroba\" é @, \"ponto com\" é .com, \"ponto com ponto br\" é .com.br, e-mails ditos por partes devem ser remontados; nomes parecidos com contatos dela são esses contatos. Na dúvida sobre um nome, e-mail ou horário, pergunte em uma linha antes de agir.",
-		"Use o que você sabe da pessoa: se as ferramentas do Beatitude estiverem disponíveis, chame ler_perfil e listar_pessoas para saber quem é quem (esposa, filhos, sócios) antes de interpretar o pedido.",
+		"Economia de rodadas: a ponte já leu o banco do WhatsApp e entrega no pedido um bloco \"Contexto pronto\" com as pessoas do círculo (nome e chat_jid), as conversas candidatas a pendente e as últimas mensagens de quem o pedido cita. Use esse bloco antes de qualquer ferramenta; chame list_messages só para uma conversa que não veio nele, e list_chats ou search_contacts só se o nome não aparecer. Não repita o que o bloco já tem.",
+		"ler_perfil e listar_pessoas do Beatitude: chame só quando o pedido depender de parentesco ou papel (\"minha esposa\", \"meu sócio\", \"os meninos\") e o nome não estiver claro no contexto pronto, ou quando precisar de fatos e ganchos sobre a pessoa para escrever melhor. Um pedido que já diz o nome não precisa deles.",
 		"Ignore o próprio grupo Beatitude (" + grupo + ") ao revisar conversas.",
-		"Pedido 'pendentes' (ou parecido): conversas individuais e grupos pequenos das últimas 72 horas em que a última mensagem é de outra pessoa, ou em que alguém perguntou algo direto e ficou sem resposta. Ignore grupos grandes, avisos, propaganda e mensagens que não pedem resposta. Ordene pelo que mais importa, no máximo 8: no texto visível, uma linha por conversa com o número, o nome, há quanto tempo e o que pediram; os rascunhos vão no bloco.",
+		"Pedido 'pendentes' (ou parecido): parta das candidatas do contexto pronto (conversas individuais das últimas 72 horas em que a última mensagem é de outra pessoa). Grupos pequenos só se a pessoa pedir. Ignore avisos, propaganda e mensagens que não pedem resposta. Ordene pelo que mais importa, no máximo 8: no texto visível, uma linha por conversa com o número, o nome, há quanto tempo e o que pediram; os rascunhos vão no bloco.",
 		"Pedido 'temas' (ou parecido): use as ferramentas do Beatitude se estiverem disponíveis (ações, marcos, memórias) e o WhatsApp para dizer o que está parado e qual é o próximo passo, agrupado pelas oito dimensões quando fizer sentido. No máximo 6 itens.",
 		"Se uma ferramenta não estiver disponível, siga com o que tem e diga em uma linha o que faltou.",
 		"Agora são " + agora + " (horário de Brasília).",
@@ -377,19 +471,99 @@ func beatitudeRodarClaude(claude, pedido string) (string, error) {
 
 	prompt := "Conversa recente no grupo Beatitude (mais antiga primeiro):\n" + contexto +
 		"\n\nPedido novo da pessoa:\n" + pedido
+	if pronto := beatitudeContextoPronto(grupo, pedido); pronto != "" {
+		prompt += "\n\n" + pronto
+	}
+
+	beatitude.mu.Lock()
+	modelo, rapido := beatitude.cfg.Modelo, beatitude.cfg.ModoRapido
+	beatitude.mu.Unlock()
+	if modelo == "" {
+		modelo = beatitudeModeloPadrao
+	}
+	if beatitudePedeModeloForte(pedido) {
+		modelo = beatitudeModeloForte
+	}
 
 	mcpCfg, err := beatitudeMCPConfig()
 	if err != nil {
-		return "", err
+		return "", beatitudeMedida{}, err
 	}
-	return beatitudeExecClaude(claude, prompt, sistema,
-		[]string{"--mcp-config", mcpCfg},
+	extra := []string{"--mcp-config", mcpCfg, "--model", modelo}
+	if rapido {
+		extra = append(extra, "--strict-mcp-config")
+	}
+	extra = append(extra, beatitudeFlagsLeves(claude)...)
+	return beatitudeExecClaudeMedido(claude, prompt, sistema, extra,
 		beatitudeFerramentasLiberadas, beatitudeFerramentasNegadas, beatitudeTimeout)
+}
+
+var beatitudeModeloForteRe = regexp.MustCompile(`(?i)\b(pensa|pense|pensar)\s+(melhor|bem|com\s+calma)\b|\bcom\s+calma\b|\bcaprich`)
+
+// beatitudePedeModeloForte: "pensa melhor", "com calma", "capricha" no pedido
+// trocam o sonnet pelo opus naquela execucao.
+func beatitudePedeModeloForte(pedido string) bool {
+	return beatitudeModeloForteRe.MatchString(pedido)
+}
+
+// beatitudeFlagsLeves: flags que tiram peso da subida do `claude -p` e so
+// entram se a versao instalada as conhece (lidas de `claude --help`, uma vez).
+//
+//	--tools WebSearch            so essa ferramenta embutida (as outras ja eram negadas; agora nem entram no prompt)
+//	--disable-slash-commands     nao carrega skills
+//	--no-session-persistence     nao grava a sessao em disco
+//	--effort medium              menos pensamento por rodada; o mordomo faz tarefas curtas
+func beatitudeFlagsLeves(claude string) []string {
+	ajuda := beatitudeAjudaClaude(claude)
+	var out []string
+	add := func(flag string, valores ...string) {
+		if strings.Contains(ajuda, flag) {
+			out = append(out, flag)
+			out = append(out, valores...)
+		}
+	}
+	add("--tools", "WebSearch")
+	add("--disable-slash-commands")
+	add("--no-session-persistence")
+	add("--no-chrome") // o mordomo nao usa o Chrome neste passo (o navegador tem o proprio claude -p --chrome)
+	add("--effort", "medium")
+	return out
+}
+
+var beatitudeAjuda struct {
+	mu     sync.Mutex
+	claude string
+	texto  string
+	em     time.Time
+}
+
+func beatitudeAjudaClaude(claude string) string {
+	beatitudeAjuda.mu.Lock()
+	defer beatitudeAjuda.mu.Unlock()
+	if beatitudeAjuda.claude == claude && time.Since(beatitudeAjuda.em) < 6*time.Hour {
+		return beatitudeAjuda.texto
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, claude, "--help")
+	cmd.Env = beatitudeAmbiente()
+	out, _ := cmd.Output()
+	beatitudeAjuda.claude, beatitudeAjuda.texto, beatitudeAjuda.em = claude, string(out), time.Now()
+	return beatitudeAjuda.texto
 }
 
 // beatitudeExecClaude roda `claude -p` sem tela com as listas de ferramentas
 // dadas e devolve o texto final. Comum ao pedido normal e ao navegador.
 func beatitudeExecClaude(claude, prompt, sistema string, extra, liberadas, negadas []string, limite time.Duration) (string, error) {
+	r, _, err := beatitudeExecClaudeMedido(claude, prompt, sistema, extra, liberadas, negadas, limite)
+	return r, err
+}
+
+// beatitudeExecClaudeMedido e o mesmo, devolvendo tambem o que o JSON do
+// `claude -p` conta sobre a execucao (duracao, tempo de API, turnos, tokens).
+// A medida vem preenchida mesmo quando ha erro, se o JSON chegou a sair.
+func beatitudeExecClaudeMedido(claude, prompt, sistema string, extra, liberadas, negadas []string, limite time.Duration) (string, beatitudeMedida, error) {
+	var medida beatitudeMedida
 	ctx, cancel := context.WithTimeout(context.Background(), limite)
 	defer cancel()
 
@@ -411,7 +585,7 @@ func beatitudeExecClaude(claude, prompt, sistema string, extra, liberadas, negad
 
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("passou de %d minutos", int(limite.Minutes()))
+		return "", medida, fmt.Errorf("passou de %d minutos", int(limite.Minutes()))
 	}
 
 	var r struct {
@@ -421,12 +595,38 @@ func beatitudeExecClaude(claude, prompt, sistema string, extra, liberadas, negad
 		Negacoes []struct {
 			ToolName string `json:"tool_name"`
 		} `json:"permission_denials"`
+		// medicao (15-10)
+		DurationMs    int64   `json:"duration_ms"`
+		DurationApiMs int64   `json:"duration_api_ms"`
+		NumTurns      int     `json:"num_turns"`
+		TotalCostUSD  float64 `json:"total_cost_usd"`
+		SessionID     string  `json:"session_id"`
+		Usage         struct {
+			Input         int64 `json:"input_tokens"`
+			CacheCreation int64 `json:"cache_creation_input_tokens"`
+			CacheRead     int64 `json:"cache_read_input_tokens"`
+			Output        int64 `json:"output_tokens"`
+		} `json:"usage"`
+		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
 	}
 	if jerr := json.Unmarshal(saida.Bytes(), &r); jerr != nil {
 		if err != nil {
-			return "", fmt.Errorf("%v: %s", err, beatitudeCurto(erro.String()+saida.String(), 300))
+			return "", medida, fmt.Errorf("%v: %s", err, beatitudeCurto(erro.String()+saida.String(), 300))
 		}
-		return "", fmt.Errorf("saída inesperada do Claude: %s", beatitudeCurto(saida.String(), 300))
+		return "", medida, fmt.Errorf("saída inesperada do Claude: %s", beatitudeCurto(saida.String(), 300))
+	}
+	medida.ModeloMs, medida.ApiMs, medida.Turnos = r.DurationMs, r.DurationApiMs, r.NumTurns
+	medida.TokensEntrada = r.Usage.Input + r.Usage.CacheCreation
+	medida.TokensCache = r.Usage.CacheRead
+	medida.TokensSaida = r.Usage.Output
+	medida.CustoUSD, medida.Sessao = r.TotalCostUSD, r.SessionID
+	if len(r.ModelUsage) > 0 {
+		nomes := make([]string, 0, len(r.ModelUsage))
+		for k := range r.ModelUsage {
+			nomes = append(nomes, k)
+		}
+		sort.Strings(nomes)
+		medida.Modelo = strings.Join(nomes, "+")
 	}
 	if len(r.Negacoes) > 0 { // diagnostico: quais ferramentas a trava negou
 		nomes := []string{}
@@ -439,12 +639,12 @@ func beatitudeExecClaude(claude, prompt, sistema string, extra, liberadas, negad
 		beatitude.mu.Unlock()
 	}
 	if r.IsError && strings.Contains(r.Result, "Not logged in") {
-		return "", fmt.Errorf("o Claude Code deste Mac não está logado; abra o Terminal, rode claude e entre com a sua conta")
+		return "", medida, fmt.Errorf("o Claude Code deste Mac não está logado; abra o Terminal, rode claude e entre com a sua conta")
 	}
 	if r.IsError || strings.TrimSpace(r.Result) == "" {
-		return "", fmt.Errorf("Claude devolveu erro (%s): %s", r.Subtype, beatitudeCurto(r.Result+" "+erro.String(), 300))
+		return "", medida, fmt.Errorf("Claude devolveu erro (%s): %s", r.Subtype, beatitudeCurto(r.Result+" "+erro.String(), 300))
 	}
-	return strings.TrimSpace(r.Result), nil
+	return strings.TrimSpace(r.Result), medida, nil
 }
 
 // beatitudeSend: o UNICO envio deste modulo. Sem parametro de destinatario.
@@ -536,14 +736,25 @@ func beatitudeMCPConfig() (string, error) {
 	if uv == "" {
 		return "", fmt.Errorf("uv não encontrado")
 	}
-	cfg := map[string]interface{}{
-		"mcpServers": map[string]interface{}{
-			"lumnia-zap": map[string]interface{}{
-				"command": uv,
-				"args":    []string{"--directory", servidor, "run", "main.py"},
-			},
+	servidores := map[string]interface{}{
+		"lumnia-zap": map[string]interface{}{
+			"command": uv,
+			"args":    []string{"--directory", servidor, "run", "main.py"},
 		},
 	}
+	// Modo rapido (--strict-mcp-config): o Claude ignora os outros MCPs da
+	// conta, entao o do Beatitude precisa vir daqui. Mesmo nome e mesma URL
+	// do `claude mcp add ... beatitude`, para reaproveitar a autenticacao.
+	beatitude.mu.Lock()
+	rapido := beatitude.cfg.ModoRapido
+	beatitude.mu.Unlock()
+	if rapido {
+		servidores["beatitude"] = map[string]interface{}{
+			"type": "http",
+			"url":  beatitudeMCPURL,
+		}
+	}
+	cfg := map[string]interface{}{"mcpServers": servidores}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	dir := filepath.Join(cwd, beatitudeWorkDir)
 	_ = os.MkdirAll(dir, 0o700)
@@ -596,6 +807,12 @@ func beatitudeContextoDoGrupo(grupo string, limite int) string {
 }
 
 func beatitudeRegistrar(inicio time.Time, pedido, resposta, status, erro string) {
+	beatitudeRegistrarMedido(inicio, pedido, resposta, status, erro, nil)
+}
+
+// beatitudeRegistrarMedido grava a execucao e, quando ha medida, as fases.
+// A medida tambem vai ao bridge.log em uma linha, para ler sem abrir o banco.
+func beatitudeRegistrarMedido(inicio time.Time, pedido, resposta, status, erro string, m *beatitudeMedida) {
 	beatitude.mu.Lock()
 	if erro != "" {
 		beatitude.ultimo = erro
@@ -603,12 +820,77 @@ func beatitudeRegistrar(inicio time.Time, pedido, resposta, status, erro string)
 		beatitude.ultimo = ""
 	}
 	beatitude.mu.Unlock()
+	if m != nil && panel.logger != nil {
+		panel.logger.Infof("Beatitude: medida [%s] %s: %s", status, beatitudeCurto(pedido, 60), m.String())
+	}
 	if panel.store == nil {
 		return
 	}
-	_, _ = panel.store.db.Exec(
-		`INSERT INTO beatitude_runs (iniciado_em, terminado_em, pedido, resposta, status, erro) VALUES (?, ?, ?, ?, ?, ?)`,
-		inicio, time.Now(), pedido, resposta, status, erro)
+	if m == nil {
+		_, _ = panel.store.db.Exec(
+			`INSERT INTO beatitude_runs (iniciado_em, terminado_em, pedido, resposta, status, erro) VALUES (?, ?, ?, ?, ?, ?)`,
+			inicio, time.Now(), pedido, resposta, status, erro)
+		return
+	}
+	_, err := panel.store.db.Exec(
+		`INSERT INTO beatitude_runs (iniciado_em, terminado_em, pedido, resposta, status, erro,
+			espera_ms, transcricao_ms, claude_ms, modelo_ms, api_ms, entrega_ms, total_ms, turnos,
+			tokens_entrada, tokens_cache, tokens_saida, custo_usd, modelo)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		inicio, time.Now(), pedido, resposta, status, erro,
+		m.EsperaMs, m.TranscricaoMs, m.ClaudeMs, m.ModeloMs, m.ApiMs, m.EntregaMs, m.TotalMs, m.Turnos,
+		m.TokensEntrada, m.TokensCache, m.TokensSaida, m.CustoUSD, m.Modelo)
+	if err != nil && panel.logger != nil {
+		panel.logger.Warnf("Beatitude: falha ao gravar medida: %v", err)
+	}
+}
+
+// beatitudeResumoMedidas devolve a mediana das fases nas ultimas n execucoes
+// medidas do mordomo (status ok, claude_ms > 0). Mediana, nao media: um
+// "pendentes" de 4 minutos nao deve esconder que o "oi" leva 40 s.
+func beatitudeResumoMedidas(n int) map[string]interface{} {
+	out := map[string]interface{}{"n": 0}
+	if panel.store == nil {
+		return out
+	}
+	rows, err := panel.store.db.Query(`SELECT espera_ms, transcricao_ms, claude_ms, modelo_ms, api_ms, total_ms, turnos
+		FROM beatitude_runs WHERE status = 'ok' AND claude_ms > 0 AND pedido NOT LIKE 'preparar:%' AND pedido NOT LIKE 'navegador:%' AND pedido NOT LIKE 'teste:%'
+		ORDER BY id DESC LIMIT ?`, n)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	var espera, transc, subida, ferr, api, total, turnos []int64
+	for rows.Next() {
+		var m beatitudeMedida
+		if rows.Scan(&m.EsperaMs, &m.TranscricaoMs, &m.ClaudeMs, &m.ModeloMs, &m.ApiMs, &m.TotalMs, &m.Turnos) != nil {
+			continue
+		}
+		espera = append(espera, m.EsperaMs)
+		transc = append(transc, m.TranscricaoMs)
+		subida = append(subida, m.SubidaMs())
+		ferr = append(ferr, m.FerramentasMs())
+		api = append(api, m.ApiMs)
+		total = append(total, m.TotalMs)
+		turnos = append(turnos, int64(m.Turnos))
+	}
+	mediana := func(v []int64) int64 {
+		if len(v) == 0 {
+			return 0
+		}
+		c := append([]int64(nil), v...)
+		sort.Slice(c, func(i, j int) bool { return c[i] < c[j] })
+		return c[len(c)/2]
+	}
+	out["n"] = len(total)
+	out["espera_ms"] = mediana(espera)
+	out["transcricao_ms"] = mediana(transc)
+	out["subida_ms"] = mediana(subida)
+	out["ferramentas_ms"] = mediana(ferr)
+	out["api_ms"] = mediana(api)
+	out["total_ms"] = mediana(total)
+	out["turnos"] = mediana(turnos)
+	return out
 }
 
 func beatitudeRunsDesde(t time.Time) int {
@@ -678,6 +960,8 @@ func registerBeatitudeRoutes() {
 	http.HandleFunc("/api/panel/beatitude/grupos", h(beatitudeGruposHandler))
 	http.HandleFunc("/api/panel/beatitude/ligar", h(beatitudeLigarHandler))
 	http.HandleFunc("/api/panel/beatitude/desligar", h(beatitudeDesligarHandler))
+	http.HandleFunc("/api/panel/beatitude/ajustes", h(beatitudeAjustesHandler))
+	http.HandleFunc("/api/panel/beatitude/testar-rapido", h(beatitudeTestarRapidoHandler))
 	registerBeatitudePreparoRoutes()
 	registerBeatitudePonteRoutes()
 }
@@ -695,15 +979,32 @@ func beatitudeStatusHandler(w http.ResponseWriter, r *http.Request) {
 		Pedido string    `json:"pedido"`
 		Status string    `json:"status"`
 		Erro   string    `json:"erro"`
+		// medicao (15-10); zero quando a execucao e anterior a ela
+		TotalMs       int64  `json:"total_ms"`
+		EsperaMs      int64  `json:"espera_ms"`
+		TranscricaoMs int64  `json:"transcricao_ms"`
+		SubidaMs      int64  `json:"subida_ms"`
+		FerramentasMs int64  `json:"ferramentas_ms"`
+		ApiMs         int64  `json:"api_ms"`
+		Turnos        int    `json:"turnos"`
+		Modelo        string `json:"modelo"`
 	}
 	var runs []run
 	if panel.store != nil {
-		rows, qerr := panel.store.db.Query(`SELECT iniciado_em, pedido, status, COALESCE(erro,'') FROM beatitude_runs ORDER BY id DESC LIMIT 5`)
+		rows, qerr := panel.store.db.Query(`SELECT iniciado_em, pedido, status, COALESCE(erro,''),
+			COALESCE(espera_ms,0), COALESCE(transcricao_ms,0), COALESCE(claude_ms,0), COALESCE(modelo_ms,0),
+			COALESCE(api_ms,0), COALESCE(total_ms,0), COALESCE(turnos,0), COALESCE(modelo,'')
+			FROM beatitude_runs ORDER BY id DESC LIMIT 10`)
 		if qerr == nil {
 			for rows.Next() {
 				var x run
-				if rows.Scan(&x.Em, &x.Pedido, &x.Status, &x.Erro) == nil {
+				var m beatitudeMedida
+				if rows.Scan(&x.Em, &x.Pedido, &x.Status, &x.Erro,
+					&m.EsperaMs, &m.TranscricaoMs, &m.ClaudeMs, &m.ModeloMs, &m.ApiMs, &m.TotalMs, &m.Turnos, &m.Modelo) == nil {
 					x.Pedido = beatitudeCurto(x.Pedido, 80)
+					x.TotalMs, x.EsperaMs, x.TranscricaoMs = m.TotalMs, m.EsperaMs, m.TranscricaoMs
+					x.SubidaMs, x.FerramentasMs, x.ApiMs = m.SubidaMs(), m.FerramentasMs(), m.ApiMs
+					x.Turnos, x.Modelo = m.Turnos, m.Modelo
 					runs = append(runs, x)
 				}
 			}
@@ -720,11 +1021,98 @@ func beatitudeStatusHandler(w http.ResponseWriter, r *http.Request) {
 		"rodando":       rodando,
 		"ultimo_erro":   ultimo,
 		"execucoes":     runs,
+		"medidas":       beatitudeResumoMedidas(20),
+		"modelo":        cfg.Modelo,
+		"modelo_padrao": beatitudeModeloPadrao,
+		"modo_rapido":   cfg.ModoRapido,
+		"transcritor":   beatitudeTranscritorEstado(),
 		"teto_por_hora": beatitudeMaxPorHora,
 	} {
 		resp[k] = v
 	}
 	writeJSON(w, resp)
+}
+
+// beatitudeAjustesHandler: modelo do mordomo e modo rapido, pelo painel.
+func beatitudeAjustesHandler(w http.ResponseWriter, r *http.Request) {
+	if !beatitudeExigePainel(w, r) {
+		return
+	}
+	var corpo struct {
+		Modelo     *string `json:"modelo"`
+		ModoRapido *bool   `json:"modo_rapido"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&corpo); err != nil {
+		http.Error(w, "json inválido", http.StatusBadRequest)
+		return
+	}
+	beatitude.mu.Lock()
+	if corpo.Modelo != nil {
+		m := strings.TrimSpace(strings.ToLower(*corpo.Modelo))
+		if m != "sonnet" && m != "opus" && m != "" {
+			beatitude.mu.Unlock()
+			http.Error(w, "modelo deve ser sonnet ou opus", http.StatusBadRequest)
+			return
+		}
+		beatitude.cfg.Modelo = m
+	}
+	if corpo.ModoRapido != nil {
+		beatitude.cfg.ModoRapido = *corpo.ModoRapido
+	}
+	err := beatitudeSalvar()
+	beatitude.mu.Unlock()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// beatitudeTestarRapidoHandler roda um `claude -p` de sondagem com o modo
+// rapido LIGADO (independente do ajuste salvo) e devolve quais servidores MCP
+// o Claude enxergou e quanto a subida custou. E o teste do passo 1: se o
+// Google (agenda, Gmail) sumir no modo rapido, o modo rapido fica desligado.
+func beatitudeTestarRapidoHandler(w http.ResponseWriter, r *http.Request) {
+	if !beatitudeExigePainel(w, r) {
+		return
+	}
+	claude, err := beatitudeAcharClaude()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	beatitude.mu.Lock()
+	antes := beatitude.cfg.ModoRapido
+	beatitude.cfg.ModoRapido = true
+	beatitude.mu.Unlock()
+	mcpCfg, cerr := beatitudeMCPConfig()
+	beatitude.mu.Lock()
+	beatitude.cfg.ModoRapido = antes
+	beatitude.mu.Unlock()
+	if cerr != nil {
+		http.Error(w, cerr.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	prompt := "Sem chamar nenhuma ferramenta: liste os nomes dos servidores MCP (prefixos mcp__) que você tem disponíveis agora, separados por vírgula, e nada mais. Se não houver nenhum, responda: nenhum."
+	extra := append([]string{"--mcp-config", mcpCfg, "--strict-mcp-config", "--model", beatitudeModeloPadrao}, beatitudeFlagsLeves(claude)...)
+	inicio := time.Now()
+	resp, m, rerr := beatitudeExecClaudeMedido(claude, prompt, "Responda em uma linha.", extra, beatitudeFerramentasLiberadas, beatitudeFerramentasNegadas, 3*time.Minute)
+	m.ClaudeMs = time.Since(inicio).Milliseconds()
+	m.TotalMs = m.ClaudeMs
+	out := map[string]interface{}{
+		"servidores":    resp,
+		"claude_ms":     m.ClaudeMs,
+		"subida_ms":     m.SubidaMs(),
+		"api_ms":        m.ApiMs,
+		"tem_google":    strings.Contains(strings.ToLower(resp), "google") || strings.Contains(strings.ToLower(resp), "gmail"),
+		"tem_beatitude": strings.Contains(strings.ToLower(resp), "beatitude"),
+		"tem_zap":       strings.Contains(strings.ToLower(resp), "lumnia"),
+	}
+	if rerr != nil {
+		out["erro"] = rerr.Error()
+	}
+	beatitudeRegistrarMedido(inicio, "teste: modo rápido", resp, map[bool]string{true: "ok", false: "erro"}[rerr == nil], map[bool]string{true: "", false: fmt.Sprint(rerr)}[rerr == nil], &m)
+	writeJSON(w, out)
 }
 
 func beatitudeGruposHandler(w http.ResponseWriter, r *http.Request) {
@@ -776,6 +1164,7 @@ func beatitudeLigarHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	panel.logger.Infof("Beatitude: modulo LIGADO no grupo %s", req.GrupoJID)
+	beatitudeTranscritorAquecer()
 	go beatitudeSend(beatitudeMarca + ": ligado neste Mac. Escreva aqui o que precisa, por exemplo \"pendentes\" ou \"temas\". Pode mandar por texto ou áudio. Eu leio e respondo neste grupo; mensagem para outra pessoa só sai quando você responde *envia* com o número do rascunho, ou *sim* com o número de uma ação do app (por exemplo, *sim 3*).")
 	writeJSON(w, map[string]interface{}{"ok": true})
 }

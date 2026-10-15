@@ -91,9 +91,11 @@ func ponteUltimas(grupo string) []ponteUltima {
 	var pares []par
 	for rows.Next() {
 		var c string
-		var em time.Time
-		if rows.Scan(&c, &em) == nil {
-			pares = append(pares, par{c, em})
+		var bruto interface{} // MAX(timestamp) volta como texto; ver ponteTempoSQL
+		if rows.Scan(&c, &bruto) == nil {
+			if em, ok := ponteTempoSQL(bruto); ok {
+				pares = append(pares, par{c, em})
+			}
 		}
 	}
 	vistos := map[string]bool{}

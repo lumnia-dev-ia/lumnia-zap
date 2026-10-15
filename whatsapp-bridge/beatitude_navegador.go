@@ -123,15 +123,17 @@ func beatitudeExecutarNavegador(id int64) {
 	}, "\n")
 
 	inicio := time.Now()
-	resp, err := beatitudeExecClaude(claude, "Tarefa aprovada pela pessoa:\n"+tarefa, sistema,
+	resp, m, err := beatitudeExecClaudeMedido(claude, "Tarefa aprovada pela pessoa:\n"+tarefa, sistema,
 		[]string{"--chrome"}, beatitudeNavLiberadas, beatitudeFerramentasNegadas, beatitudeNavTimeout)
+	m.ClaudeMs = time.Since(inicio).Milliseconds()
+	m.TotalMs = m.ClaudeMs
 	if err != nil {
 		msg := beatitudeCurto(err.Error(), 200)
 		if strings.Contains(strings.ToLower(msg), "chrome") || strings.Contains(strings.ToLower(msg), "extension") {
 			msg += ". Confira se o Chrome está aberto no Mac com a extensão do Claude conectada"
 		}
 		beatitudeSend(beatitudeMarca + ": não consegui terminar no navegador (" + msg + ").")
-		beatitudeRegistrar(inicio, "navegador: "+beatitudeCurto(tarefa, 80), "", "erro", err.Error())
+		beatitudeRegistrarMedido(inicio, "navegador: "+beatitudeCurto(tarefa, 80), "", "erro", err.Error(), &m)
 		return
 	}
 	_, _ = panel.store.db.Exec(`UPDATE beatitude_navegador SET resultado = ? WHERE id = ?`, resp, id)
@@ -142,5 +144,5 @@ func beatitudeExecutarNavegador(id int64) {
 	neg := beatitude.negadas
 	beatitude.negadas = ""
 	beatitude.mu.Unlock()
-	beatitudeRegistrar(inicio, "navegador: "+beatitudeCurto(tarefa, 80), resp, "ok", neg)
+	beatitudeRegistrarMedido(inicio, "navegador: "+beatitudeCurto(tarefa, 80), resp, "ok", neg, &m)
 }

@@ -79,7 +79,7 @@ func beatitudePorIcone(grupo string) {
 
 // Transcricao no proprio Mac, offline (faster-whisper via uv, que o Zap ja
 // instala). A voz nao sai da maquina. Na primeira vez baixa o modelo.
-const beatitudeTranscritor = `import sys
+const beatitudeTranscritorAvulsoPy = `import sys
 from faster_whisper import WhisperModel
 dica = sys.argv[3] if len(sys.argv) > 3 else None
 m = WhisperModel("small", device="cpu", compute_type="int8", download_root=sys.argv[2])
@@ -106,6 +106,24 @@ func beatitudeTranscrever(grupo, msgID string) (string, error) {
 	if !ok || err != nil {
 		return "", fmt.Errorf("não consegui baixar o áudio: %v", err)
 	}
+	// Passo 6 (15-10): primeiro o residente (modelo ja carregado); se ele
+	// falhar, o caminho avulso de sempre, que sobe tudo do zero.
+	dica := beatitudeDicaTranscricao()
+	texto, rerr := beatitudeTranscritorPedir(caminho, dica)
+	if rerr == nil {
+		if texto == "" {
+			return "", fmt.Errorf("não entendi nada no áudio")
+		}
+		return texto, nil
+	}
+	if panel.logger != nil {
+		panel.logger.Warnf("Beatitude: transcritor residente falhou (%v); usando o avulso", rerr)
+	}
+	return beatitudeTranscreverAvulso(caminho, dica)
+}
+
+// beatitudeTranscreverAvulso: um processo por audio (o caminho original).
+func beatitudeTranscreverAvulso(caminho, dica string) (string, error) {
 	uv := beatitudeAcharUV()
 	if uv == "" {
 		return "", fmt.Errorf("uv não encontrado")
@@ -114,13 +132,13 @@ func beatitudeTranscrever(grupo, msgID string) (string, error) {
 	dir := filepath.Join(cwd, beatitudeWorkDir)
 	_ = os.MkdirAll(filepath.Join(dir, "modelos"), 0o700)
 	script := filepath.Join(dir, "transcrever.py")
-	if err := os.WriteFile(script, []byte(beatitudeTranscritor), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(beatitudeTranscritorAvulsoPy), 0o600); err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, uv, "run", "--no-project", "--python", "3.11",
-		"--with", "faster-whisper", "python", script, caminho, filepath.Join(dir, "modelos"), beatitudeDicaTranscricao())
+		"--with", "faster-whisper", "python", script, caminho, filepath.Join(dir, "modelos"), dica)
 	cmd.Env = beatitudeAmbiente()
 	out, err := cmd.Output()
 	if err != nil {

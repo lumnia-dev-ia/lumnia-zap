@@ -561,9 +561,16 @@ async function loadBeatitude() {
     btLigado = !!b.ligado;
     btPoll = !!(b.instalando || b.login_ativo);
     if (b.ligado) {
+      // medição (15-10): onde o tempo de cada pedido foi parar
+      const seg = ms => ms >= 1000 ? (ms/1000).toFixed(ms >= 10000 ? 0 : 1) + ' s' : (ms > 0 ? ms + ' ms' : '—');
+      const fases = r => r.total_ms ? `<span class="st">espera ${seg(r.espera_ms)}${r.transcricao_ms ? ' · áudio ' + seg(r.transcricao_ms) : ''} · subida ≈${seg(r.subida_ms)} · ferramentas ≈${seg(r.ferramentas_ms)} · modelo ${seg(r.api_ms)} · ${r.turnos} turno${r.turnos === 1 ? '' : 's'}${r.modelo ? ' · ' + esc(r.modelo) : ''}</span>` : '';
       const runs = (b.execucoes || []).map(r =>
         `<tr><td class="num">${esc(new Date(r.em).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',dateStyle:'short',timeStyle:'short'}))}</td>
-         <td class="msg">${esc(r.pedido)}</td><td>${r.status === 'ok' || r.status === 'envio' ? esc(r.status === 'envio' ? 'enviado' : 'ok') + (r.erro ? '<span class="st">' + esc(r.erro) + '</span>' : '') : '<span style="color:var(--critical)">' + esc(r.erro || r.status) + '</span>'}</td></tr>`).join('');
+         <td class="msg">${esc(r.pedido)}</td><td>${r.status === 'ok' || r.status === 'envio' ? esc(r.status === 'envio' ? 'enviado' : 'ok') + (r.erro ? '<span class="st">' + esc(r.erro) + '</span>' : '') : '<span style="color:var(--critical)">' + esc(r.erro || r.status) + '</span>'}</td>
+         <td class="num">${r.total_ms ? seg(r.total_ms) : '—'}${fases(r)}</td></tr>`).join('');
+      const md = b.medidas || {};
+      const resumo = md.n ? `<div class="note" style="margin:0 0 12px"><div><b>Tempo de resposta</b> mediana dos últimos ${md.n} pedidos: <b>${seg(md.total_ms)}</b>
+        <span class="st">espera ${seg(md.espera_ms)} · áudio ${seg(md.transcricao_ms)} · subida do Claude ≈${seg(md.subida_ms)} · ferramentas ≈${seg(md.ferramentas_ms)} · modelo ${seg(md.api_ms)} · ${md.turnos} turnos. "Subida" é o processo do Claude Code antes de o modelo começar (Node + conexão com os MCPs); "ferramentas" é o tempo fora do modelo durante a execução. Os dois são aproximados.</span></div></div>` : '';
       const avisoLogin = (b.claude_ok && !b.claude_logado)
         ? `<div class="note" style="margin:0 0 12px">O Claude saiu da sua conta neste Mac.
            <button class="btn ghost" style="margin-left:auto" onclick="btEntrar(this)">Entrar de novo</button></div>` : '';
@@ -572,12 +579,29 @@ async function loadBeatitude() {
           <div class="state ok"><span>Ligado${b.rodando ? ' · trabalhando agora' : ''}</span></div>
           <div class="meta"><div><b>Grupo</b>${esc(b.grupo_nome || b.grupo_jid)}</div>
           <div><b>Conta Claude</b>${esc(b.claude_email || (b.claude_logado ? 'conectada' : '—'))}</div>
-          <div><b>Teto</b>${b.teto_por_hora} pedidos/hora</div></div>
+          <div><b>Teto</b>${b.teto_por_hora} pedidos/hora</div>
+          <div><b>Voz</b>${(b.transcritor || {}).pronto ? 'transcritor pronto (' + esc(b.transcritor.modelo) + ', ' + b.transcritor.pedidos + ' áudios)' : (b.transcritor || {}).subindo ? 'carregando o modelo…' : 'transcritor parado' + ((b.transcritor || {}).ultimo_err ? ' · ' + esc(b.transcritor.ultimo_err) : '')}</div></div>
           <div class="spacer"></div>
           <button class="btn danger" onclick="btDesligar()">Desligar</button>
         </div>
         <div id="bt-ponte" style="margin-bottom:12px"></div>
-        ${runs ? `<table><tr><th>Quando</th><th>Pedido</th><th>Resultado</th></tr>${runs}</table>`
+        <div class="note" style="margin:0 0 12px;flex-wrap:wrap;gap:8px">
+          <div><b>Velocidade</b>
+            modelo
+            <select id="bt-modelo" onchange="btAjustar({modelo:this.value})">
+              <option value="" ${!b.modelo ? 'selected' : ''}>padrão (${esc(b.modelo_padrao)})</option>
+              <option value="sonnet" ${b.modelo === 'sonnet' ? 'selected' : ''}>sonnet (rápido)</option>
+              <option value="opus" ${b.modelo === 'opus' ? 'selected' : ''}>opus (mais lento)</option>
+            </select>
+            · modo rápido (só Zap + Beatitude, sem os outros MCPs da conta):
+            <button class="btn ghost" onclick="btAjustar({modo_rapido:${b.modo_rapido ? 'false' : 'true'}})">${b.modo_rapido ? 'ligado · desligar' : 'desligado · ligar'}</button>
+            <button class="btn ghost" onclick="btTestarRapido(this)">Testar modo rápido</button>
+            <span class="st">"pensa melhor" ou "com calma" no pedido usa o opus naquela vez. O teste roda um Claude de sondagem (~20 s) e diz quais MCPs ele enxerga no modo rápido; se a agenda e o Gmail não aparecerem, deixe desligado.</span>
+            <div id="bt-teste-rapido" class="st"></div>
+          </div>
+        </div>
+        ${resumo}
+        ${runs ? `<table><tr><th>Quando</th><th>Pedido</th><th>Resultado</th><th>Tempo</th></tr>${runs}</table>`
                : '<div class="empty">Nenhum pedido ainda. Escreva "pendentes" no grupo.</div>'}`;
       btLoadPonte();
       return;
@@ -672,6 +696,22 @@ async function btParear(btn) {
 async function btDesparear() {
   try { await btPost('/api/panel/beatitude/desparear'); } catch (e) {}
   btLoadPonte();
+}
+async function btAjustar(ajustes) {
+  try { await btPost('/api/panel/beatitude/ajustes', ajustes); } catch (e) { alert(e.message || e); }
+  loadBeatitude();
+}
+async function btTestarRapido(btn) {
+  const out = $('bt-teste-rapido');
+  btn.disabled = true; out.textContent = 'sondando… (até 1 min)';
+  try {
+    const r = await btPost('/api/panel/beatitude/testar-rapido');
+    const seg = ms => (ms/1000).toFixed(1) + ' s';
+    out.innerHTML = `Claude enxergou: <b>${esc(r.servidores || '(nada)')}</b> · processo ${seg(r.claude_ms)} · subida ≈${seg(r.subida_ms)} · ` +
+      (r.tem_zap ? 'Zap ✓' : 'Zap ✗') + ' · ' + (r.tem_beatitude ? 'Beatitude ✓' : 'Beatitude ✗ (rode no Terminal: claude mcp add --transport http --scope user beatitude https://beatitude.lumnia.dev/mcp e autentique)') +
+      ' · ' + (r.tem_google ? 'Google ✓' : 'Google ✗ (agenda e Gmail não entram no modo rápido)') + (r.erro ? ' · erro: ' + esc(r.erro) : '');
+  } catch (e) { out.textContent = 'falhou: ' + (e.message || e); }
+  btn.disabled = false;
 }
 async function btInstalar(btn) { btn.disabled = true; try { await btPost('/api/panel/beatitude/instalar-claude'); } catch (e) {} btPoll = true; setTimeout(loadBeatitude, 800); }
 async function btEntrar(btn) { btn.disabled = true; try { await btPost('/api/panel/beatitude/entrar'); } catch (e) {} btPoll = true; setTimeout(loadBeatitude, 1500); }

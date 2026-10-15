@@ -1088,6 +1088,7 @@ func agendaCriar(ctx context.Context, p agendaPedidoCriar) (*agendaEvento, error
 	if panel.logger != nil {
 		panel.logger.Infof("Agenda da Apple: compromisso criado em %q (%s)", alvo.Nome, agendaQuando(inicio, fim, p.DiaInteiro))
 	}
+	ponteAgendaDepois() // o brief ve o compromisso novo no proximo ciclo da ponte
 	ev := &agendaEvento{
 		UID: uid, Titulo: strings.TrimSpace(p.Titulo), DiaInteiro: p.DiaInteiro, Calendario: alvo.Nome,
 		Local: strings.TrimSpace(p.Local), Notas: beatitudeCurto(strings.TrimSpace(p.Notas), 160), Beatitude: true,

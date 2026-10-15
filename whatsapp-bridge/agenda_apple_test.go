@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -426,5 +427,92 @@ func TestAgendaFluxoCompleto(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "store", "apple.json")); !os.IsNotExist(err) {
 		t.Error("apple.json devia sumir")
+	}
+}
+
+func TestPonteAgendaCorpoEDeposito(t *testing.T) {
+	loc := agendaTestLoc(t)
+	antes := time.Local
+	time.Local = loc
+	defer func() { time.Local = antes }()
+
+	// servidor do Beatitude falso: primeiro 404 (rota ainda nao existe), depois 200
+	var recebidos []map[string]interface{}
+	chamadas := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != ponteAgendaRota || r.Header.Get("Authorization") != "Bearer bz_teste" {
+			t.Errorf("pedido inesperado: %s %s", r.Method, r.URL.Path)
+		}
+		chamadas++
+		if chamadas == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"ok":false,"erro":"rota_desconhecida"}`)
+			return
+		}
+		var corpo map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&corpo)
+		recebidos = append(recebidos, corpo)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	// agenda conectada contra o iCloud falso
+	icloud, _ := agendaServidorFalso(t)
+	defer icloud.Close()
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	defer os.Chdir(wd)
+	_ = os.MkdirAll(filepath.Join(dir, "store"), 0o755)
+	initAgendaApple()
+	oldURL := agendaDiscoverURL
+	agendaDiscoverURL = icloud.URL + "/"
+	defer func() { agendaDiscoverURL = oldURL }()
+	if err := agendaConfigurar(context.Background(), "diego@example.com", "abcd-efgh-ijkl-mnop", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	ponte.mu.Lock()
+	ponte.cfg = ponteConfig{Token: "bz_teste", URL: srv.URL}
+	ponte.mu.Unlock()
+	ponteAgenda.mu.Lock()
+	ponteAgenda.ultimoEm, ponteAgenda.proximoEm, ponteAgenda.forcar, ponteAgenda.ultimoErr = time.Time{}, time.Time{}, false, ""
+	ponteAgenda.mu.Unlock()
+
+	// 1a rodada: 404 -> recuo, sem erro na ponte
+	ponteEnviarAgenda()
+	if chamadas != 1 || !ponteAgenda.proximoEm.After(time.Now().Add(ponteAgendaRecuo-time.Minute)) {
+		t.Fatalf("esperava recuo depois do 404: chamadas=%d proximo=%v", chamadas, ponteAgenda.proximoEm)
+	}
+	// 2a rodada no mesmo minuto: nada (recuo)
+	ponteEnviarAgenda()
+	if chamadas != 1 {
+		t.Fatalf("devia respeitar o recuo, chamadas=%d", chamadas)
+	}
+	// compromisso criado forca o deposito, que agora o servidor aceita
+	ponteAgendaDepois()
+	ponteEnviarAgenda()
+	if chamadas != 2 || len(recebidos) != 1 {
+		t.Fatalf("esperava deposito forcado: chamadas=%d recebidos=%d", chamadas, len(recebidos))
+	}
+	corpo := recebidos[0]
+	if corpo["fonte"] != "apple" || corpo["fuso"] != "America/Sao_Paulo" {
+		t.Errorf("corpo: %v", corpo)
+	}
+	evs, _ := corpo["eventos"].([]interface{})
+	// o iCloud falso tem eventos em out/2026; a janela e hoje+7, entao a lista depende da data.
+	// O que importa aqui e a forma: sem "notas" e sem "uid" em nenhum evento.
+	for _, e := range evs {
+		m := e.(map[string]interface{})
+		if _, tem := m["notas"]; tem {
+			t.Error("notas nunca vao ao servidor")
+		}
+		if _, tem := m["uid"]; tem {
+			t.Error("uid nao vai ao servidor")
+		}
+	}
+	// 3a rodada logo em seguida: cadencia de 30 min segura
+	ponteEnviarAgenda()
+	if chamadas != 2 {
+		t.Errorf("devia esperar a cadencia, chamadas=%d", chamadas)
 	}
 }

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026 Lumnia — Diego Penna Moreira · SPDX-License-Identifier: MIT -->
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agenda da Apple · Lumnia Zap</title>
+<style>
+  :root{color-scheme:light;
+    --surface:#fcfcfb;--page:#f9f9f7;--ink:#0b0b0b;--ink-2:#52514e;--ink-muted:#898781;
+    --hairline:#e1e0d9;--ring:rgba(11,11,11,.10);
+    --accent:#9A6A00;--accent-hi:#7A5400;--accent-wash:#f7f0dd;
+    --good:#0ca30c;--good-ink:#006300;--critical:#d03b3b;--critical-wash:#fbe9e9;--ghost:rgba(11,11,11,.04)}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 18px 70px;background:var(--page);color:var(--ink);
+    font:17px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+  .sub{color:var(--ink-2);margin:0 0 22px}
+  .card{background:var(--surface);border:1px solid var(--ring);border-radius:14px;padding:20px 22px;margin-bottom:16px}
+  .card h2{margin:0 0 12px;font-size:12px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-muted)}
+  .estado{display:flex;align-items:center;gap:10px;font-weight:600;font-size:18px}
+  .estado .dot{width:12px;height:12px;border-radius:50%;background:var(--ink-muted);flex:none}
+  .estado.ok .dot{background:var(--good)}.estado.ok{color:var(--good-ink)}
+  .estado.bad .dot{background:var(--critical)}.estado.bad{color:var(--critical)}
+  .estado-sub{color:var(--ink-2);font-size:15px;margin-top:4px}
+  ol.passos{padding-left:22px;margin:0}
+  ol.passos li{margin:0 0 10px}
+  ol.passos b{font-weight:650}
+  .nota{background:var(--accent-wash);border-radius:10px;padding:12px 14px;font-size:15.5px;margin-top:12px}
+  .nota.alerta{background:var(--critical-wash)}
+  label.fl{display:block;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-muted);margin:12px 0 6px}
+  input[type=text],input[type=email],input[type=password]{width:100%;background:#fff;color:var(--ink);border:1px solid var(--ring);border-radius:10px;font:inherit;font-size:18px;padding:12px 13px}
+  input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;font:inherit;font-size:17px;font-weight:600;padding:13px 20px;cursor:pointer;margin-top:14px}
+  .btn:hover{background:var(--accent-hi)}.btn:disabled{opacity:.55;cursor:default}
+  .btn.ghost{background:none;color:var(--ink-2);border:1px solid var(--ring)}
+  .btn.danger{background:none;color:var(--critical);border:1px solid var(--ring)}
+  .cal{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--hairline)}
+  .cal:first-of-type{border-top:none}
+  .cal .cor{width:14px;height:14px;border-radius:4px;flex:none;background:#bbb}
+  .cal .nome{flex:1;font-size:17px}
+  .cal .nome small{display:block;color:var(--ink-muted);font-size:13.5px}
+  .cal label{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink-2);white-space:nowrap}
+  .cal input{width:20px;height:20px}
+  .msg{margin-top:12px;font-size:15.5px;min-height:22px}
+  .msg.err{color:var(--critical)}.msg.ok{color:var(--good-ink)}
+  .hide{display:none}
+  a{color:var(--accent)}
+  footer{margin-top:28px;font-size:13px;color:var(--ink-muted);text-align:center}
+  @media (max-width:520px){ .cal{flex-wrap:wrap} .cal .nome{flex-basis:100%} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agenda da Apple</h1>
+  <p class="sub">O calendário do seu iPhone, lido e escrito pelo seu computador. Você não muda nada no celular.</p>
+
+  <div class="card">
+    <h2>Situação</h2>
+    <div class="estado" id="estado"><span class="dot"></span><span id="estado-txt">carregando…</span></div>
+    <div class="estado-sub" id="estado-sub"></div>
+  </div>
+
+  <div class="card" id="card-passos">
+    <h2>1. Criar a senha de app na Apple (dois minutos)</h2>
+    <p style="margin:0 0 12px">Você precisa do <b>e-mail da sua conta Apple</b> (aparece no topo dos Ajustes do iPhone, abaixo do seu nome) e da senha dessa conta.</p>
+    <ol class="passos">
+      <li>Abra <a href="https://account.apple.com/account/manage/section/security" target="_blank" rel="noopener">account.apple.com</a> e entre. A Apple pede o código de seis dígitos que aparece no seu iPhone.</li>
+      <li>Toque em <b>Início de Sessão e Segurança</b>.</li>
+      <li>Toque no cartão <b>Senhas específicas de apps</b> (“Ver detalhes”).</li>
+      <li>Toque no <b>+</b> ao lado de “Senhas”.</li>
+      <li>Escreva <b>Beatitude</b> e toque em <b>Criar</b>. A Apple pode pedir a sua senha de novo.</li>
+      <li>Aparece uma senha de 16 letras, no formato <b>xxxx-xxxx-xxxx-xxxx</b>. <b>Ela aparece uma vez só.</b> Copie e cole aqui embaixo.</li>
+    </ol>
+    <div class="nota">Fechou sem copiar? Sem problema: na mesma tela, toque no ⊖ ao lado de “Beatitude” para apagar e crie outra.</div>
+  </div>
+
+  <div class="card" id="card-form">
+    <h2>2. Colar aqui</h2>
+    <label class="fl" for="apple_id">E-mail da conta Apple</label>
+    <input type="email" id="apple_id" autocomplete="username" placeholder="nome@icloud.com" autocapitalize="off" spellcheck="false">
+    <label class="fl" for="senha">Senha de app (16 letras)</label>
+    <input type="password" id="senha" autocomplete="off" placeholder="xxxx-xxxx-xxxx-xxxx" autocapitalize="off" spellcheck="false">
+    <div id="senha-dica" class="estado-sub hide">Já há uma senha guardada. Deixe em branco para manter, ou cole uma nova.</div>
+    <button class="btn" id="btn-testar" onclick="testar()">Testar</button>
+    <div class="msg" id="msg-testar"></div>
+  </div>
+
+  <div class="card hide" id="card-cals">
+    <h2>3. Escolher os calendários</h2>
+    <p style="margin:0 0 6px">Desmarque os que o Beatitude <b>não</b> deve ler. Marque como <b>principal</b> o calendário onde ele grava quando você pedir um compromisso.</p>
+    <div id="cals"></div>
+    <button class="btn" id="btn-salvar" onclick="salvar()">Salvar</button>
+    <div class="msg" id="msg-salvar"></div>
+  </div>
+
+  <div class="card">
+    <h2>O que você está autorizando</h2>
+    <ul style="margin:0;padding-left:20px">
+      <li>A senha de app é uma chave separada da sua senha da Apple. Não dá acesso ao iPhone, às fotos nem às compras.</li>
+      <li>Pela natureza dessa chave, ela permitiria ler também o e-mail e os contatos do iCloud. <b>O Beatitude usa só a agenda</b>, e isso está travado no código, não numa promessa.</li>
+      <li>A chave fica guardada <b>neste computador</b>, não nos servidores da Lumnia. O servidor recebe só o que o brief precisa: os compromissos do dia e dos próximos dias.</li>
+      <li>O Beatitude nunca apaga nem altera um compromisso que ele não criou, e nunca aceita nem recusa convites por você.</li>
+      <li>Para cancelar: account.apple.com → Início de Sessão e Segurança → Senhas específicas de apps → ⊖ ao lado de “Beatitude”. Na mesma hora o Beatitude deixa de enxergar a agenda e esta página avisa.</li>
+    </ul>
+  </div>
+
+  <div class="card hide" id="card-desc">
+    <h2>Desconectar</h2>
+    <p style="margin:0 0 4px">Apaga a senha deste computador. Depois, revogue a senha “Beatitude” também na Apple.</p>
+    <button class="btn danger" onclick="desconectar()">Desconectar a Agenda da Apple</button>
+    <div class="msg" id="msg-desc"></div>
+  </div>
+
+  <footer>Página local em localhost · inacessível fora desta máquina · <a href="/">painel do Zap</a></footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let cfg = null, testados = null;
+
+async function api(url, body) {
+  const r = await fetch(url, body === undefined ? {} : {
+    method: 'POST', headers: {'Content-Type': 'application/json', 'X-Lumnia-Painel': '1'},
+    body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.erro || ('HTTP ' + r.status));
+  return j;
+}
+function fmtData(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return d.toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'2-digit'}) + ' ' +
+         d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+}
+function mostrarEstado(c) {
+  const el = $('estado'), txt = $('estado-txt'), sub = $('estado-sub');
+  el.className = 'estado';
+  const lidos = (c.calendarios || []).filter(x => x.ler).length;
+  if (c.estado === 'conectada') {
+    el.classList.add('ok'); txt.textContent = 'Conectada';
+    sub.textContent = `${c.apple_id} · ${lidos} calendário${lidos === 1 ? '' : 's'}` +
+      (c.ultima_leitura ? ` · última leitura ${fmtData(c.ultima_leitura)}` : '');
+  } else if (c.estado === 'senha_invalida') {
+    el.classList.add('bad'); txt.textContent = 'A Apple recusou a senha';
+    sub.textContent = 'A senha foi revogada ou digitada errada. Crie outra na Apple (passo 1) e cole de novo.';
+  } else if (c.estado === 'sem_sinal') {
+    el.classList.add('bad'); txt.textContent = 'Sem resposta da Apple';
+    sub.textContent = (c.ultimo_erro || 'A internet ou o iCloud não responderam') + '. Nada foi apagado; tentamos de novo na próxima leitura.';
+  } else {
+    txt.textContent = 'Não configurada';
+    sub.textContent = 'Siga os passos 1 e 2.';
+  }
+}
+function desenharCals(lista, principal) {
+  const box = $('cals'); box.innerHTML = '';
+  lista.forEach(c => {
+    const row = document.createElement('div'); row.className = 'cal';
+    const cor = document.createElement('span'); cor.className = 'cor';
+    if (c.cor) cor.style.background = c.cor.slice(0, 7);
+    const nome = document.createElement('div'); nome.className = 'nome';
+    nome.textContent = c.nome;
+    if (c.so_leitura) { const s = document.createElement('small'); s.textContent = 'somente leitura (compartilhado com você)'; nome.appendChild(s); }
+    const ler = document.createElement('label');
+    ler.innerHTML = `<input type="checkbox" data-url="${c.url}" ${c.ler ? 'checked' : ''}> ler`;
+    const prin = document.createElement('label');
+    prin.innerHTML = `<input type="radio" name="principal" value="${c.url}" ${c.url === principal ? 'checked' : ''} ${c.so_leitura ? 'disabled' : ''}> principal`;
+    row.append(cor, nome, ler, prin);
+    box.appendChild(row);
+  });
+}
+async function carregar() {
+  try {
+    cfg = await api('/api/agenda/estado');
+    mostrarEstado(cfg);
+    if (cfg.estado !== 'nao') {
+      $('apple_id').value = cfg.apple_id || '';
+      $('senha-dica').classList.remove('hide');
+      $('card-desc').classList.remove('hide');
+      if ((cfg.calendarios || []).length) {
+        desenharCals(cfg.calendarios, cfg.principal);
+        $('card-cals').classList.remove('hide');
+      }
+    }
+  } catch (e) { $('estado-txt').textContent = 'A ponte não respondeu'; }
+}
+async function testar() {
+  const b = $('btn-testar'), m = $('msg-testar');
+  m.className = 'msg'; m.textContent = 'Falando com a Apple…'; b.disabled = true;
+  try {
+    const senha = $('senha').value;
+    let r;
+    if (!senha && cfg && cfg.estado !== 'nao') {
+      r = {calendarios: cfg.calendarios};
+    } else {
+      r = await api('/api/agenda/testar', {apple_id: $('apple_id').value, senha_app: senha});
+    }
+    testados = r.calendarios;
+    const n = testados.length;
+    m.className = 'msg ok'; m.textContent = n ? `Funcionou: ${n} calendário${n === 1 ? '' : 's'} encontrado${n === 1 ? '' : 's'}. Escolha abaixo e salve.` : 'A senha funcionou, mas a conta não tem calendário de compromissos.';
+    const principal = (cfg && cfg.principal) || (testados.find(c => !c.so_leitura) || {}).url;
+    desenharCals(testados, principal);
+    $('card-cals').classList.remove('hide');
+    $('card-cals').scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (e) { m.className = 'msg err'; m.textContent = e.message; }
+  b.disabled = false;
+}
+async function salvar() {
+  const b = $('btn-salvar'), m = $('msg-salvar');
+  m.className = 'msg'; m.textContent = 'Gravando…'; b.disabled = true;
+  try {
+    const ler = {};
+    document.querySelectorAll('#cals input[type=checkbox]').forEach(i => ler[i.dataset.url] = i.checked);
+    const p = document.querySelector('#cals input[type=radio]:checked');
+    const r = await api('/api/agenda/configurar', {
+      apple_id: $('apple_id').value, senha_app: $('senha').value, ler, principal: p ? p.value : ''});
+    cfg = r.config; $('senha').value = '';
+    mostrarEstado(cfg); desenharCals(cfg.calendarios, cfg.principal);
+    $('senha-dica').classList.remove('hide'); $('card-desc').classList.remove('hide');
+    m.className = 'msg ok'; m.textContent = 'Pronto. A partir de agora o Beatitude e o seu Claude enxergam a agenda do iPhone.';
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  } catch (e) { m.className = 'msg err'; m.textContent = e.message; }
+  b.disabled = false;
+}
+async function desconectar() {
+  if (!confirm('Apagar a senha de app deste computador? O Beatitude deixa de ver a agenda do iPhone.')) return;
+  const m = $('msg-desc');
+  try {
+    await api('/api/agenda/desconectar', {});
+    cfg = null; testados = null;
+    $('senha').value = ''; $('apple_id').value = '';
+    $('card-cals').classList.add('hide'); $('card-desc').classList.add('hide'); $('senha-dica').classList.add('hide');
+    $('msg-testar').textContent = ''; $('msg-salvar').textContent = '';
+    m.className = 'msg ok'; m.textContent = 'Desconectada. Lembre de revogar a senha “Beatitude” na Apple.';
+    await carregar();
+  } catch (e) { m.className = 'msg err'; m.textContent = e.message; }
+}
+carregar();
+</script>
+</body>
+</html>

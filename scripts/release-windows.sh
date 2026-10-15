@@ -80,7 +80,7 @@ if feito pacote.built; then pulou; else
   STAGE="$(mktemp -d)/lumnia-zap"
   mkdir -p "$STAGE/whatsapp-bridge" "$STAGE/whatsapp-mcp-server"
   cp "$DIST/whatsapp-bridge.exe" "$STAGE/whatsapp-bridge/whatsapp-bridge.exe"
-  for f in main.py whatsapp.py audio.py pyproject.toml uv.lock .python-version; do
+  for f in main.py whatsapp.py audio.py agenda.py pyproject.toml uv.lock .python-version; do
     cp "$RAIZ/whatsapp-mcp-server/$f" "$STAGE/whatsapp-mcp-server/$f"
   done
   printf '# lumnia-zap mcp server\n' > "$STAGE/whatsapp-mcp-server/README.md"

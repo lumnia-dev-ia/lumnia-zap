@@ -570,6 +570,10 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 		"uptime_secs": int(time.Since(startedAt).Seconds()),
 		"version":     versaoPonte(),
 	}
+	// Agenda da Apple: so aparece depois de configurada (agenda_apple.go)
+	if a := agendaResumoStatus(); a != nil {
+		resp["agenda_apple"] = a
+	}
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())
 	}

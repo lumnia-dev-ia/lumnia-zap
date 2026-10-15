@@ -120,6 +120,42 @@ default_tools_approval_mode = "prompt"   # tudo pede aprovação
 servidor MCP, conforme as permissões que você der na conversa — o instalador
 não muda nada nesse comportamento.
 
+### Agenda da Apple (iCloud) — opcional
+
+Quem vive no calendário do iPhone pode ligar o Zap à agenda do iCloud. A
+partir daí o seu Claude lê os compromissos (passado e futuro, recorrências já
+expandidas), procura por palavra, acha janelas livres e cria compromissos
+direto no calendário do iPhone — sem trocar o calendário padrão do celular e
+sem passar nada pelo Google.
+
+Como funciona: a ponte fala CalDAV com o iCloud usando uma **senha específica
+de app** que você gera na sua conta Apple (account.apple.com → Início de
+Sessão e Segurança → Senhas específicas de apps → "+"). A senha fica só no
+seu computador, em `store/apple.json`, e nunca aparece no log. A página de
+configuração é `http://localhost:8080/apple`: cole o e-mail da conta Apple e a
+senha, toque em **Testar**, escolha quais calendários o Claude lê e em qual ele
+grava, e salve.
+
+Enquanto você não configurar, a função não existe: nenhuma ferramenta aparece
+no Claude, nada no painel e nenhuma chamada sai para a Apple.
+
+Ferramentas que entram no MCP depois de configurado:
+
+| Ferramenta | O que faz |
+|---|---|
+| `agenda_listar` | compromissos num intervalo (padrão: hoje + 7 dias) |
+| `agenda_buscar` | procura por título, local, notas ou convidado (±1 ano) |
+| `agenda_livre` | janelas livres para um compromisso de certa duração |
+| `agenda_criar` | cria um compromisso, sem convidados, no calendário escolhido |
+
+O que ele **não** faz, de propósito: não edita nem apaga compromissos (nem os
+que ele mesmo criou), não aceita nem recusa convites, não cria evento com
+convidados (no iCloud isso dispara o convite na hora), e não lê e-mail nem
+contatos do iCloud, embora a senha de app em tese permitisse — o cliente só
+fala com a pasta de calendários, e isso está no código. Para revogar, apague a
+senha "Beatitude" (ou o nome que deu) na mesma tela da Apple; o Zap percebe na
+próxima leitura e a página avisa.
+
 ### Aviso honesto
 
 Ao instalar, você dá ao seu assistente acesso de leitura e escrita ao seu

@@ -327,6 +327,12 @@ async function refreshStatus() {
     bits.push(`<div><b>No ar há</b>${fmtUptime(s.uptime_secs)}</div>`);
     if (s.last_received_secs != null)
       bits.push(`<div><b>Última recebida</b>${humanSecs(s.last_received_secs)}</div>`);
+    if (s.agenda_apple) {  // só existe depois que a pessoa configurou em /apple
+      const a = s.agenda_apple, n = a.calendarios || 0;
+      const txt = a.estado === 'conectada' ? `conectada (${n} calendário${n === 1 ? '' : 's'})`
+        : a.estado === 'senha_invalida' ? 'senha recusada pela Apple' : 'sem resposta da Apple';
+      bits.push(`<div><b>Agenda da Apple</b><a href="/apple" style="color:inherit">${txt}</a></div>`);
+    }
     $('meta').innerHTML = bits.join('');
     $('versao').textContent = s.version ? 'v' + s.version : 'versão desconhecida';
 

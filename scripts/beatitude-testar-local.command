@@ -22,6 +22,17 @@ mv -f "$DEST/whatsapp-bridge.novo" "$DEST/whatsapp-bridge"
 launchctl kickstart -k "gui/$(id -u)/dev.lumnia.zap"
 sleep 3
 
+echo "3b/4 Atualizando o servidor MCP instalado (agenda.py, main.py…)…"
+MCP_DEST="$HOME/Library/Application Support/LumniaZap/whatsapp-mcp-server"
+if [ -d "$MCP_DEST" ]; then
+  for f in main.py whatsapp.py audio.py agenda.py; do
+    cp "$(dirname "$0")/../whatsapp-mcp-server/$f" "$MCP_DEST/$f"
+  done
+  echo "     copiado para $MCP_DEST (vale na próxima conversa do Claude)"
+else
+  echo "     pasta do MCP não encontrada em $MCP_DEST — pulei"
+fi
+
 echo "4/4  Conferindo o Claude Code…"
 CLAUDE_BIN="$(zsh -lic 'command -v claude' 2>/dev/null | tail -1)"
 [ -z "$CLAUDE_BIN" ] && [ -x "$HOME/.local/bin/claude" ] && CLAUDE_BIN="$HOME/.local/bin/claude"
@@ -41,3 +52,4 @@ echo
 echo "Para voltar atrás: cp \"$DEST/whatsapp-bridge.anterior\" \"$DEST/whatsapp-bridge.novo\" && mv -f \"$DEST/whatsapp-bridge.novo\" \"$DEST/whatsapp-bridge\" && launchctl kickstart -k gui/\$(id -u)/dev.lumnia.zap"
 echo
 open "http://localhost:8080/#beatitude"
+echo "Agenda da Apple (iCloud): http://localhost:8080/apple"

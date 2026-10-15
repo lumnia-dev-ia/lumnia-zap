@@ -944,6 +944,9 @@ func main() {
 	startPanelScheduler()
 	initBeatitude()
 	registerBeatitudeRoutes()
+	// Agenda da Apple (agenda_apple.go): inerte sem store/apple.json
+	initAgendaApple()
+	registerAgendaRoutes()
 
 	// Start REST API server
 	startRESTServer(client, messageStore, 8080)

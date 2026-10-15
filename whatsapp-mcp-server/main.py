@@ -286,6 +286,12 @@ def download_media(message_id: str, chat_jid: str, include_image: bool = True) -
 
     return content
 
+# Agenda da Apple (agenda.py): as quatro ferramentas so entram quando a ponte
+# diz que a pessoa configurou a senha de app em http://localhost:8080/apple.
+# Sem isso, quem usa o Zap nem ve que a funcao existe.
+import agenda as _agenda
+_agenda.registrar(mcp)
+
 if __name__ == "__main__":
     # Initialize and run the server
     mcp.run(transport='stdio')

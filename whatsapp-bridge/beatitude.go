@@ -66,6 +66,12 @@ var beatitudeFerramentasLiberadas = []string{
 	"mcp__lumnia-zap__get_last_interaction",
 	"mcp__lumnia-zap__get_message_context",
 	"mcp__lumnia-zap__search_contacts",
+	// Agenda da Apple (agenda_apple.go): o MCP so registra estas quando a
+	// pessoa configurou a senha de app; liberar aqui nao cria nada sozinho.
+	"mcp__lumnia-zap__agenda_listar",
+	"mcp__lumnia-zap__agenda_buscar",
+	"mcp__lumnia-zap__agenda_livre",
+	"mcp__lumnia-zap__agenda_criar",
 	"mcp__beatitude",           // registrado com `claude mcp add ... beatitude`
 	"mcp__claude_ai_Beatitude", // ou o conector do claude.ai, quando sincronizado
 

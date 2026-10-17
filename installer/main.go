@@ -33,6 +33,10 @@ const (
 	claudeBaixa = "https://claude.ai/download"
 )
 
+// atalhoBundleID e o identificador do atalho "Lumnia Zap.app" (release.sh e
+// criarAtalho). E o que o plist da ponte cita em AssociatedBundleIdentifiers.
+const atalhoBundleID = "dev.lumnia.zap.launcher"
+
 func main() {
 	if err := instalar(); err != nil {
 		anotar("ERRO: %v", err)
@@ -181,6 +185,12 @@ func instalar() error {
 	}
 
 	anotar("Ponte no ar: %s respondeu", painelURL)
+
+	// O que o Mac do pai ensinou (17-10): a ponte subir hoje nao quer dizer
+	// que ela volta amanha. Conferimos agora e dizemos na cara o que falta.
+	confs := prontidao()
+	anotar("%s", prontidaoTexto(confs))
+
 	relatorio := salvarRelatorio(home)
 	if relatorio != "" {
 		anotar("Relatório salvo em %s", relatorio)
@@ -200,13 +210,19 @@ func instalar() error {
 	if codexOK && avisoCodex == "" {
 		proximo += "No Codex, o lumnia-zap já entra na próxima sessão.\n\n"
 	}
+	avisoProntidao := ""
+	if !prontidaoOK(confs) {
+		avisoProntidao = "ATENÇÃO — este Mac pode parar a ponte quando ninguém estiver olhando:\n" +
+			prontidaoTexto(confs) + "\n\n"
+	}
 	alerta("Pronto!",
 		"O "+produto+" está instalado.\n\n"+
+			avisoProntidao+
 			resumoAgentes(claudesCfg, codexOK, avisoCodex)+"\n\n"+
 			"A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu "+
 			"celular em Configurações → Aparelhos conectados.\n\n"+
 			proximo+
-			"O atalho ficou na sua Mesa. O instalador vai para o Lixo; você não precisa mais dele.", false)
+			"O "+produto+" ficou em Aplicativos, com um atalho na Mesa. O instalador vai para o Lixo; você não precisa mais dele.", false)
 	jogarInstaladorNoLixo(home)
 	return nil
 }
@@ -822,6 +838,16 @@ func gravarConfigClaude(cfgDir, destino, uv string) error {
 
 // ------------------------------------------------------------------ servico
 
+// instalarServico escreve o LaunchAgent da ponte.
+//
+// AssociatedBundleIdentifiers (macOS 13+) faz o item aparecer em Ajustes >
+// Geral > Itens de Inicio como "Lumnia Zap", com o icone do atalho, em vez
+// do nome do time da assinatura ("DPM ASSESSORIA EMPRESARIAL LTDA"). Foi
+// com esse nome que o item apareceu no Mac do pai do Diego em 17-10 — e foi
+// desligado, porque ninguem reconhece. Desligado, o RunAtLoad nao roda no
+// login seguinte e a ponte so volta quando alguem clica no atalho. Para a
+// chave valer, o app com esse identificador precisa estar registrado no
+// LaunchServices e assinado pelo mesmo time: criarAtalho cuida disso.
 func instalarServico(home, destino string) error {
 	agentes := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(agentes, 0o755); err != nil {
@@ -840,11 +866,12 @@ func instalarServico(home, destino string) error {
 	<key>WorkingDirectory</key><string>%s</string>
 	<key>RunAtLoad</key><true/>
 	<key>KeepAlive</key><true/>
+	<key>AssociatedBundleIdentifiers</key><array><string>%s</string></array>
 	<key>StandardOutPath</key><string>%s</string>
 	<key>StandardErrorPath</key><string>%s</string>
 </dict>
 </plist>
-`, label, bin, filepath.Join(destino, "whatsapp-bridge"),
+`, label, bin, filepath.Join(destino, "whatsapp-bridge"), atalhoBundleID,
 		filepath.Join(destino, "logs", "bridge.log"),
 		filepath.Join(destino, "logs", "bridge-error.log"))
 
@@ -997,9 +1024,44 @@ func atalhoAssinado() string {
 	return ""
 }
 
+// pastaDoAtalho escolhe onde o "Lumnia Zap.app" mora: /Applications quando
+// da para escrever la, senao ~/Applications. Ate a 1.0.7 ele ficava na Mesa;
+// mudou porque o AssociatedBundleIdentifiers do LaunchAgent so funciona com
+// o app registrado no LaunchServices, e a Mesa e o lugar mais facil de o
+// usuario apagar sem querer. Na Mesa fica um atalho simbolico para ele.
+func pastaDoAtalho(home string) string {
+	if f, err := os.CreateTemp("/Applications", ".lumnia-zap-*"); err == nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "/Applications"
+	}
+	return filepath.Join(home, "Applications")
+}
+
 func criarAtalho(home, destino string) error {
-	app := filepath.Join(home, "Desktop", produto+".app")
+	pasta := pastaDoAtalho(home)
+	if err := os.MkdirAll(pasta, 0o755); err != nil {
+		return err
+	}
+	app := filepath.Join(pasta, produto+".app")
 	_ = os.RemoveAll(app)
+	// Instalacoes anteriores deixaram o app na Mesa; sai para dar lugar ao link.
+	naMesa := filepath.Join(home, "Desktop", produto+".app")
+	_ = os.RemoveAll(naMesa)
+	defer func() {
+		if _, err := os.Stat(filepath.Join(app, "Contents", "MacOS", "zap")); err != nil {
+			return
+		}
+		// Registra o app no LaunchServices agora, sem esperar o Finder ve-lo:
+		// e disso que depende o nome "Lumnia Zap" em Itens de Inicio.
+		exec.Command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+			"-f", app).Run()
+		if err := os.Symlink(app, naMesa); err == nil {
+			anotar("Atalho em %s; link na Mesa", app)
+		} else {
+			anotar("Atalho em %s (sem link na Mesa: %v)", app, err)
+		}
+	}()
 
 	// Caminho normal: copiar o atalho assinado e notarizado. O ditto preserva a
 	// assinatura; o Gatekeeper aceita mesmo com a marca de procedencia que o

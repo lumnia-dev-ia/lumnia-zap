@@ -24,6 +24,7 @@ CARIMBO="$(date +%Y%m%d-%H%M)"
 F_PASTA=nao; F_BIN=nao; F_PLIST=nao; F_SERVICO=nao; F_DESABILITADO=nao
 F_PROC=0; F_PORTA=nao; F_PAINEL=nao; F_ERRLOG=nao; F_BANCO=ok
 F_MANUAL=nao; F_CLAUDE=nao; F_MCP=nao; F_ULTIMALINHA="(sem log)"
+F_AUTOLOGOUT=0; F_SLEEP="?"
 
 # ------------------------------------------------------------------ ajudantes
 
@@ -307,13 +308,52 @@ for c in "$HOME/.local/bin/uv" /opt/homebrew/bin/uv /usr/local/bin/uv; do
   [ -x "$c" ] && echo "    $c ($("$c" --version 2>&1 | head -1))"
 done
 
-titulo "9. O atalho na Mesa"
-if [ -d "$HOME/Desktop/Lumnia Zap.app" ]; then
-  echo "  existe: $HOME/Desktop/Lumnia Zap.app"
-else
-  echo "  NAO existe em $HOME/Desktop/Lumnia Zap.app"
-  ls -d "$HOME"/Desktop/*.app 2>/dev/null | sed 's/^/    achei em vez disso: /'
+titulo "9. O atalho (Aplicativos desde a 1.0.8; Mesa nas anteriores)"
+ACHOU_ATALHO=nao
+for a in "/Applications/Lumnia Zap.app" "$HOME/Applications/Lumnia Zap.app" "$HOME/Desktop/Lumnia Zap.app"; do
+  if [ -e "$a" ]; then
+    echo "  existe: $a"; ACHOU_ATALHO=sim
+    [ -L "$a" ] && echo "    (link para $(readlink "$a"))"
+  fi
+done
+if [ "$ACHOU_ATALHO" = nao ]; then
+  echo "  NAO existe em Aplicativos nem na Mesa"
+  ls -d "$HOME"/Desktop/*.app 2>/dev/null | sed 's/^/    achei na Mesa em vez disso: /'
 fi
+echo
+echo "O LaunchAgent cita o atalho? (AssociatedBundleIdentifiers, 1.0.8+)"
+if grep -q AssociatedBundleIdentifiers "$PLIST" 2>/dev/null; then
+  echo "  sim: em Itens de Inicio o item aparece como \"Lumnia Zap\""
+else
+  echo "  nao: em Itens de Inicio o item aparece com o nome do time da assinatura"
+  echo "  (\"DPM ASSESSORIA EMPRESARIAL LTDA\"). Foi assim que o desligaram no Mac do"
+  echo "  pai do Diego em 17-10. Reinstalar com a 1.0.8 ou mais nova corrige."
+fi
+
+titulo "9b. PRONTA PARA RODAR SOZINHA? (sessao e energia)"
+# Encerramento automatico de sessao (Privacidade e Seguranca > Avancado).
+# Ligado, o logout derruba todos os LaunchAgents da sessao, a ponte inclusive.
+F_AUTOLOGOUT="$(defaults read /Library/Preferences/.GlobalPreferences com.apple.autologout.AutoLogOutDelay 2>/dev/null || echo 0)"
+case "$F_AUTOLOGOUT" in ''|*[!0-9]*) F_AUTOLOGOUT=0 ;; esac
+if [ "$F_AUTOLOGOUT" -gt 0 ]; then
+  echo "  ATENCAO: o macOS encerra a sessao sozinho apos $((F_AUTOLOGOUT/60)) min sem uso."
+  echo "  A ponte para junto e so volta no proximo login. Desligar em:"
+  echo "  Ajustes > Privacidade e Seguranca > Avancado... > 'Encerrar sessao"
+  echo "  automaticamente apos inatividade' (ou: sudo defaults write"
+  echo "  /Library/Preferences/.GlobalPreferences com.apple.autologout.AutoLogOutDelay -int 0)"
+else
+  echo "  encerramento automatico de sessao: desligado (bom)"
+fi
+# Repouso: pmset -g mostra o perfil em uso.
+F_SLEEP="$(pmset -g 2>/dev/null | awk '$1=="sleep"{print $2; exit}')"
+[ -z "$F_SLEEP" ] && F_SLEEP="?"
+if [ "$F_SLEEP" = 0 ]; then
+  echo "  repouso: sleep 0 (bom, o Mac nao dorme)"
+else
+  echo "  ATENCAO: pmset sleep = $F_SLEEP. O Mac entra em repouso e a ponte para junto."
+  echo "  Conserto: sudo pmset -a sleep 0"
+fi
+echo "  bloqueio de tela: $(sysadminctl -screenLock status 2>&1 | tr -d '\n' | sed 's/.*screenLock//' | head -c 80)"
 
 titulo "10. Internet"
 for u in https://github.com https://objects.githubusercontent.com https://web.whatsapp.com; do
@@ -398,7 +438,14 @@ echo "  banco integro .............. $F_BANCO"
 echo "  ponte subiu na mao ......... $F_MANUAL"
 echo "  Claude instalado ........... $F_CLAUDE"
 echo "  MCP configurado ............ $F_MCP"
+echo "  auto-logout (segundos) ..... $F_AUTOLOGOUT"
+echo "  pmset sleep ................ $F_SLEEP"
 echo
+if [ "$F_AUTOLOGOUT" -gt 0 ] || { [ "$F_SLEEP" != 0 ] && [ "$F_SLEEP" != "?" ]; }; then
+  echo "  >> MESMO QUE A PONTE ESTEJA NO AR AGORA, este Mac vai derruba-la sozinho"
+  echo "     (encerramento automatico de sessao e/ou repouso). Ver a secao 9b."
+  echo
+fi
 if [ "$F_BIN" = nao ]; then
   echo "  >> O binario nao esta la. O instalador nao chegou a extrair o pacote."
 elif [ "$F_DESABILITADO" = sim ]; then

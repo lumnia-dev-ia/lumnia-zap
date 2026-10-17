@@ -516,6 +516,8 @@ func registerPanelRoutes() {
 	http.HandleFunc("/api/panel/qr.png", h(panelQRHandler))
 	http.HandleFunc("/api/panel/reconnect", h(panelReconnectHandler))
 	http.HandleFunc("/api/panel/unlink", h(panelUnlinkHandler))
+	http.HandleFunc("/api/panel/prontidao", h(panelProntidaoHandler))
+	http.HandleFunc("/api/panel/prontidao/itens-de-inicio", h(panelProntidaoAbrirHandler))
 	http.HandleFunc("/api/panel/contacts", h(panelContactsHandler))
 	http.HandleFunc("/api/panel/send", h(panelSendHandler))
 	http.HandleFunc("/api/panel/schedules", h(panelSchedulesHandler))
@@ -576,6 +578,10 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	go atualizacaoVerificar(false) // confere no GitHub no maximo a cada 6 h; nunca segura o status
 	resp["atualizacao"] = atualizacaoResumo()
+	// "Pronta para rodar sozinha" (prontidao.go): so no macOS; cache de 5 min
+	if p := prontidaoResumo(); p != nil {
+		resp["prontidao"] = p
+	}
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())
 	}

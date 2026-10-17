@@ -134,6 +134,16 @@
     </div>
   </div>
 
+  <!-- PRONTA PARA RODAR SOZINHA (prontidao.go) — só aparece com algo vermelho -->
+  <div class="card" id="prontidao" style="display:none;border-color:var(--critical)">
+    <h2>Este Mac pode parar a ponte quando ninguém estiver olhando</h2>
+    <ul id="prontidao-lista" style="margin:0 0 12px;padding-left:0;list-style:none;font-size:13.5px;color:var(--ink-2)"></ul>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ghost" onclick="prontidaoVerificar(this)">Verificar de novo</button>
+      <button class="btn ghost" id="prontidao-abrir" style="display:none" onclick="prontidaoAbrirItens()">Abrir Itens de Início</button>
+    </div>
+  </div>
+
   <!-- PAREAMENTO -->
   <div class="card" id="pairing">
     <h2>Escaneie para reconectar</h2>
@@ -336,6 +346,7 @@ async function refreshStatus() {
     $('meta').innerHTML = bits.join('');
     $('versao').textContent = s.version ? 'v' + s.version : 'versão desconhecida';
     mostrarAtualizacao(s.atualizacao);
+    mostrarProntidao(s.prontidao);
 
     $('btn-unlink').style.display = s.connected ? '' : 'none';
     $('pairing').classList.toggle('show', !!s.needs_pair);
@@ -352,6 +363,29 @@ setInterval(() => {
   $('qrtxt').textContent = qrRemaining > 0
     ? `expira em ${qrRemaining} s · renova sozinho` : 'renovando…';
 }, 1000);
+
+/* ---------- pronta para rodar sozinha (prontidao.go) ---------- */
+function mostrarProntidao(p) {
+  const card = $('prontidao');
+  if (!p || p.ok) { card.style.display = 'none'; return; }
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  $('prontidao-lista').innerHTML = p.itens.map(c => `
+    <li style="padding:7px 0;border-top:1px solid var(--hairline)">
+      <span style="font-weight:560;color:${c.ok ? 'var(--good-ink)' : 'var(--critical)'}">${c.ok ? '✓' : '✗'} ${esc(c.nome)}</span>
+      <span style="color:var(--ink-muted)"> · ${esc(c.visto)}</span>
+      ${c.fazer ? `<div style="margin-top:3px;color:var(--ink)">${esc(c.fazer)}</div>` : ''}
+    </li>`).join('');
+  $('prontidao-abrir').style.display = p.itens.some(c => c.chave === 'item_ligado' && !c.ok) ? '' : 'none';
+  card.style.display = '';
+}
+async function prontidaoVerificar(btn) {
+  btn.disabled = true; btn.textContent = 'Verificando…';
+  try { mostrarProntidao(await api('/api/panel/prontidao?agora=1')); }
+  finally { btn.disabled = false; btn.textContent = 'Verificar de novo'; }
+}
+async function prontidaoAbrirItens() {
+  try { await api('/api/panel/prontidao/itens-de-inicio', {method:'POST'}); } catch (e) {}
+}
 
 /* ---------- atualizacao (atualizacao.go) ---------- */
 function mostrarAtualizacao(a) {

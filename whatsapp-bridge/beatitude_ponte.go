@@ -136,7 +136,15 @@ func ponteLaco() {
 }
 
 func ponteRodada() {
-	if _, err := ponteChamar("/api/ponte/sinal-de-vida", map[string]interface{}{}, nil); err != nil {
+	// `estado` (1.0.8): o que este Mac pode fazer com a ponte quando ninguem
+	// estiver olhando (prontidao.go). O servidor ignora o campo enquanto nao
+	// o conhecer; quando conhecer, o app mostra em Instalar e avisa pelo push
+	// se o sinal sumir. Fora do macOS o campo nao vai.
+	sinal := map[string]interface{}{}
+	if e := prontidaoEstado(); e != nil {
+		sinal["estado"] = e
+	}
+	if _, err := ponteChamar("/api/ponte/sinal-de-vida", sinal, nil); err != nil {
 		ponteErro(err)
 		return
 	}

@@ -13,6 +13,9 @@
 // servidor de sempre, repassando stdin/stdout intactos — o stdout e do
 // protocolo JSON-RPC. O stderr vai para o Claude e tambem para
 // LocalState\logs\mcp.log.
+
+//go:build windows
+
 package main
 
 import (

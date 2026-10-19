@@ -13,6 +13,9 @@
 //
 // Compilado com -H windowsgui: nenhuma janela de console. A ponte (console)
 // sobe com CREATE_NO_WINDOW pelo mesmo motivo.
+
+//go:build windows
+
 package main
 
 import (

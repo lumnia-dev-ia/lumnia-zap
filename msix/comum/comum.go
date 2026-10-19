@@ -14,6 +14,9 @@
 // que e um caminho real (nao virtualizado), igual para a ponte e para o
 // servidor MCP, e visivel de fora para diagnostico. Atencao: desinstalar o
 // MSIX apaga essa pasta, inclusive a sessao do WhatsApp.
+
+//go:build windows
+
 package comum
 
 import (

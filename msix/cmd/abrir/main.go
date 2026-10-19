@@ -5,6 +5,9 @@
 // Mesa: se a ponte nao responde, sobe o servico.exe e espera ate 30 s; depois
 // abre o painel no navegador. Abrir o app uma vez depois de instalar tambem e
 // o que ativa a startup task do MSIX para os proximos logins.
+
+//go:build windows
+
 package main
 
 import (

@@ -75,7 +75,7 @@ printf '%s\r\n.\r\n..\\servidor\r\n..\\site-packages\r\nimport site\r\n' "$ZIPST
 (cd "$RAIZ/whatsapp-mcp-server" && uv export --frozen --no-hashes --no-dev --no-emit-project -q -o "$DIST/cache/req.txt")
 # o marcador sys_platform=='win32' seria avaliado contra o Linux; tirar os marcadores
 sed -E 's/ *;.*$//' "$DIST/cache/req.txt" | grep -E '^[A-Za-z0-9]' > "$DIST/cache/req-win.txt"
-pip install -q --disable-pip-version-check --target "$STAGE/mcp/site-packages" \
+pip install -q --disable-pip-version-check --no-compile --target "$STAGE/mcp/site-packages" \
   --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
   --only-binary=:all: --no-deps -r "$DIST/cache/req-win.txt"
 rm -rf "$STAGE/mcp/site-packages/bin"
@@ -89,7 +89,10 @@ grep -q LUMNIA_ZAP_STORE "$STAGE/mcp/servidor/whatsapp.py" || falhar "whatsapp.p
 # Python recompila tudo a cada vez que o Claude abre o servidor)
 PY312="$(uv python find 3.12 2>/dev/null || true)"
 if [ -n "$PY312" ]; then
-  "$PY312" -m compileall -q -j 0 "$STAGE/mcp/site-packages" "$STAGE/mcp/servidor" >/dev/null || true
+  # unchecked-hash: o .pyc vale pelo conteudo, nao pela data do .py — a data
+  # muda ao desempacotar o MSIX e invalidaria todos os .pyc por timestamp
+  "$PY312" -m compileall -q -f -j 0 --invalidation-mode unchecked-hash \
+    "$STAGE/mcp/site-packages" "$STAGE/mcp/servidor" >/dev/null || true
   [ -d "$STAGE/mcp/servidor/__pycache__" ] || falhar "compileall não gerou .pyc"
 else
   echo "     (sem Python 3.12 local: pacote vai sem .pyc — funciona, só inicia mais devagar)"
@@ -110,6 +113,8 @@ for nome, lado in [("Square150x150Logo", 150), ("Square44x44Logo", 44), ("StoreL
 im.resize((256, 256), Image.LANCZOS).save(mcpb_icon)
 PY
 cp "$RAIZ/LICENSE" "$STAGE/LICENSE.txt"
+# panel.go le VERSION em <pasta-do-exe>\..\VERSION = raiz do pacote
+printf '%s\n' "$(echo "$VERSAO" | cut -d. -f1-3)" > "$STAGE/VERSION"
 
 # ------------------------------------------------------------- 4. empacotar
 say "5/6  Empacotando e assinando"
@@ -127,7 +132,12 @@ SEM="$DIST/cache/sem-assinatura.msix"
 MSIX="$DIST/Lumnia-Zap-$VERSAO.msix"
 rm -f "$SEM" "$MSIX"
 "$MAKEMSIX" pack -d "$STAGE" -p "$SEM"
-osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 -in "$SEM" -out "$MSIX"
+# carimbo de tempo: sem ele, o pacote deixa de instalar quando o certificado
+# de teste vencer (365 dias). Se o TSA nao responder, assina sem carimbo.
+osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 \
+  -ts http://timestamp.digicert.com -in "$SEM" -out "$MSIX" \
+  || { echo "     (carimbo de tempo indisponível; assinando sem)"; rm -f "$MSIX";
+       osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 -in "$SEM" -out "$MSIX"; }
 osslsigncode verify -CAfile "$CERT/teste.crt" -in "$MSIX" | grep -q "Signature verification: ok" \
   || falhar "a assinatura do MSIX não confere"
 

@@ -19,7 +19,12 @@ def _log(*args, **kwargs):
     kwargs["file"] = sys.stderr
     print(*args, **kwargs)
 
-MESSAGES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'whatsapp-bridge', 'store', 'messages.db')
+# LUMNIA_ZAP_STORE aponta para a pasta store/ da ponte quando ela nao mora ao
+# lado deste arquivo — caso do pacote MSIX do Windows, cuja pasta de instalacao
+# e somente leitura e cujos dados ficam no LocalState do pacote.
+_STORE_DIR = os.environ.get('LUMNIA_ZAP_STORE', '').strip() or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'whatsapp-bridge', 'store')
+MESSAGES_DB_PATH = os.path.join(_STORE_DIR, 'messages.db')
 WHATSAPP_API_BASE_URL = "http://127.0.0.1:8080/api"  # a ponte so escuta no proprio Mac
 
 @dataclass

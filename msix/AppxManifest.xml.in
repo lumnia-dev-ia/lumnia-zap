@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lumnia Zap — pacote MSIX (fase 1: teste, fora da Store, certificado de teste).
+  Gerado por scripts/build-msix.sh; @VERSAO@ e @PUBLISHER@ sao preenchidos la.
+  O Publisher precisa ser IDENTICO ao assunto do certificado que assina.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop rescap">
+
+  <Identity Name="Lumnia.LumniaZap" Publisher="@PUBLISHER@" Version="@VERSAO@" ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Lumnia Zap</DisplayName>
+    <PublisherDisplayName>Lumnia</PublisherDisplayName>
+    <Logo>assets\StoreLogo.png</Logo>
+    <Description>Ponte local entre o seu WhatsApp e o Claude.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="pt-BR" />
+  </Resources>
+
+  <Applications>
+    <!-- Menu Iniciar: sobe a ponte se preciso e abre o painel. -->
+    <Application Id="LumniaZap" Executable="LumniaZap.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Lumnia Zap" Description="Abre o painel do Lumnia Zap"
+        BackgroundColor="transparent" Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Substitui a Tarefa Agendada: o Windows sobe o servico no login. -->
+        <desktop:Extension Category="windows.startupTask" Executable="servico.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="LumniaZapPonte" Enabled="true" DisplayName="Lumnia Zap (ponte do WhatsApp)" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+
+    <!-- Servidor MCP: sem item no Menu Iniciar, exposto pelo alias de execucao
+         %LOCALAPPDATA%\Microsoft\WindowsApps\lumnia-zap-mcp.exe -->
+    <Application Id="LumniaZapMCP" Executable="mcp\lumnia-zap-mcp.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Lumnia Zap MCP" Description="Servidor MCP do Lumnia Zap"
+        BackgroundColor="transparent" Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png" AppListEntry="none" />
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="mcp\lumnia-zap-mcp.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="lumnia-zap-mcp.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

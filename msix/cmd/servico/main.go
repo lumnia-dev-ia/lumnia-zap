@@ -65,6 +65,9 @@ func main() {
 
 		cmd := exec.Command(ponteExe)
 		cmd.Dir = trabalho
+		// O Beatitude da ponte roda o Claude Code com o servidor MCP do Zap;
+		// no pacote o servidor e o alias de execucao, nao uv + pasta ao lado.
+		cmd.Env = append(os.Environ(), "LUMNIA_ZAP_MCP_CMD="+comum.AliasMCP())
 		if log != nil { // sem log, a saida e descartada
 			cmd.Stdout = log
 			cmd.Stderr = log

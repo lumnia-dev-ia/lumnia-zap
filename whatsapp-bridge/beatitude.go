@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -682,18 +683,27 @@ func beatitudeAcharClaude() (string, error) {
 	manual := beatitude.cfg.ClaudePath
 	beatitude.mu.Unlock()
 	home, _ := os.UserHomeDir()
-	candidatos := []string{
-		manual,
-		filepath.Join(home, ".local", "bin", "claude"),
-		filepath.Join(home, ".claude", "local", "claude"),
-		"/opt/homebrew/bin/claude",
-		"/usr/local/bin/claude",
+	candidatos := []string{manual}
+	if runtime.GOOS == "windows" {
+		// instalador nativo (claude.exe) e npm global (claude.cmd)
+		candidatos = append(candidatos,
+			filepath.Join(home, ".local", "bin", "claude.exe"),
+			filepath.Join(os.Getenv("APPDATA"), "npm", "claude.cmd"),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "claude", "claude.exe"),
+		)
+	} else {
+		candidatos = append(candidatos,
+			filepath.Join(home, ".local", "bin", "claude"),
+			filepath.Join(home, ".claude", "local", "claude"),
+			"/opt/homebrew/bin/claude",
+			"/usr/local/bin/claude",
+		)
+		// instalado via npm dentro do nvm
+		if achados, err := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "claude")); err == nil {
+			candidatos = append(candidatos, achados...)
+		}
+		candidatos = append(candidatos, filepath.Join(home, ".npm-global", "bin", "claude"))
 	}
-	// instalado via npm dentro do nvm
-	if achados, err := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "claude")); err == nil {
-		candidatos = append(candidatos, achados...)
-	}
-	candidatos = append(candidatos, filepath.Join(home, ".npm-global", "bin", "claude"))
 	for _, c := range candidatos {
 		if c == "" {
 			continue
@@ -702,9 +712,22 @@ func beatitudeAcharClaude() (string, error) {
 			return c, nil
 		}
 	}
-	// ultimo recurso: o shell de login da pessoa (launchd tem PATH minimo)
+	// ultimo recurso: o PATH da pessoa (launchd e a startup task do MSIX
+	// entregam um PATH minimo, por isso a lista acima vem primeiro)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("claude"); err == nil {
+			return p, nil
+		}
+		out, err := exec.CommandContext(ctx, "where.exe", "claude").Output()
+		if err == nil {
+			if p := strings.TrimSpace(strings.Split(string(out), "\n")[0]); p != "" {
+				return p, nil
+			}
+		}
+		return "", fmt.Errorf("claude não encontrado")
+	}
 	out, err := exec.CommandContext(ctx, "/bin/zsh", "-lic", "command -v claude").Output()
 	if err == nil {
 		linhas := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -717,37 +740,39 @@ func beatitudeAcharClaude() (string, error) {
 
 // beatitudeMCPConfig grava (a cada execucao) a config do MCP do proprio Zap
 // para o Claude Code: o instalador registra o Zap so no app desktop do Claude.
-// A ponte roda em <instalacao>/whatsapp-bridge; o servidor MCP fica ao lado.
+//
+// Tres formas de chegar ao servidor, na ordem:
+//  1. LUMNIA_ZAP_MCP_CMD no ambiente — um executavel que E o servidor, sem
+//     argumentos. E o que o pacote MSIX do Windows define (o alias
+//     lumnia-zap-mcp.exe, com o Python embutido no pacote).
+//  2. uv + <instalacao>/whatsapp-mcp-server ao lado da pasta da ponte — a
+//     instalacao classica do Mac e do Windows.
 func beatitudeMCPConfig() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	servidor := filepath.Join(filepath.Dir(cwd), "whatsapp-mcp-server")
-	if _, err := os.Stat(filepath.Join(servidor, "main.py")); err != nil {
-		return "", fmt.Errorf("servidor MCP do Zap não encontrado em %s", servidor)
-	}
-	home, _ := os.UserHomeDir()
-	uv := ""
-	for _, c := range []string{
-		filepath.Join(home, ".local", "bin", "uv"),
-		"/opt/homebrew/bin/uv",
-		"/usr/local/bin/uv",
-	} {
-		if _, err := os.Stat(c); err == nil {
-			uv = c
-			break
+	var servidorZap map[string]interface{}
+	if cmd := strings.TrimSpace(os.Getenv("LUMNIA_ZAP_MCP_CMD")); cmd != "" {
+		if _, err := os.Stat(cmd); err != nil {
+			return "", fmt.Errorf("servidor MCP do Zap (LUMNIA_ZAP_MCP_CMD) não encontrado em %s", cmd)
 		}
-	}
-	if uv == "" {
-		return "", fmt.Errorf("uv não encontrado")
-	}
-	servidores := map[string]interface{}{
-		"lumnia-zap": map[string]interface{}{
+		servidorZap = map[string]interface{}{"command": cmd, "args": []string{}}
+	} else {
+		servidor := filepath.Join(filepath.Dir(cwd), "whatsapp-mcp-server")
+		if _, err := os.Stat(filepath.Join(servidor, "main.py")); err != nil {
+			return "", fmt.Errorf("servidor MCP do Zap não encontrado em %s", servidor)
+		}
+		uv := beatitudeAcharUV()
+		if uv == "" {
+			return "", fmt.Errorf("uv não encontrado")
+		}
+		servidorZap = map[string]interface{}{
 			"command": uv,
 			"args":    []string{"--directory", servidor, "run", "main.py"},
-		},
+		}
 	}
+	servidores := map[string]interface{}{"lumnia-zap": servidorZap}
 	// Modo rapido (--strict-mcp-config): o Claude ignora os outros MCPs da
 	// conta, entao o do Beatitude precisa vir daqui. Mesmo nome e mesma URL
 	// do `claude mcp add ... beatitude`, para reaproveitar a autenticacao.
@@ -771,21 +796,34 @@ func beatitudeMCPConfig() (string, error) {
 	return caminho, nil
 }
 
-// launchd entrega um PATH minimo; o servidor MCP do Zap precisa do uv.
+// launchd (e a startup task do MSIX) entregam um PATH minimo; o servidor MCP
+// do Zap e o Claude Code precisam achar seus binarios.
 func beatitudeAmbiente() []string {
 	home, _ := os.UserHomeDir()
-	extra := strings.Join([]string{
-		filepath.Join(home, ".local", "bin"),
-		"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-	}, ":")
+	var dirs []string
+	if runtime.GOOS == "windows" {
+		dirs = []string{
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(os.Getenv("APPDATA"), "npm"),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "WindowsApps"),
+			filepath.Join(os.Getenv("SystemRoot"), "System32"),
+			os.Getenv("SystemRoot"),
+		}
+	} else {
+		dirs = []string{
+			filepath.Join(home, ".local", "bin"),
+			"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+		}
+	}
+	extra := strings.Join(dirs, string(os.PathListSeparator))
 	env := []string{}
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "PATH=") {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
 			continue
 		}
 		env = append(env, e)
 	}
-	env = append(env, "PATH="+extra+":"+os.Getenv("PATH"))
+	env = append(env, "PATH="+extra+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if os.Getenv("HOME") == "" {
 		env = append(env, "HOME="+home)
 	}

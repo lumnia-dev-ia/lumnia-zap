@@ -74,6 +74,17 @@ func PastaPonte() string { return filepath.Join(PastaDados(), "whatsapp-bridge")
 func PastaStore() string { return filepath.Join(PastaPonte(), "store") }
 func PastaLogs() string  { return filepath.Join(PastaDados(), "logs") }
 
+// AliasMCP e o caminho fixo do servidor MCP, criado pelo alias de execucao do
+// pacote (windows.appExecutionAlias no AppxManifest).
+func AliasMCP() string {
+	local := os.Getenv("LOCALAPPDATA")
+	if local == "" {
+		home, _ := os.UserHomeDir()
+		local = filepath.Join(home, "AppData", "Local")
+	}
+	return filepath.Join(local, "Microsoft", "WindowsApps", "lumnia-zap-mcp.exe")
+}
+
 // PastaInstalacao e a raiz do pacote instalado (dentro de WindowsApps). Pela
 // API do pacote, e nao por os.Executable, porque um processo aberto pelo
 // alias de execucao pode reportar o caminho do alias. Fora do pacote, cai

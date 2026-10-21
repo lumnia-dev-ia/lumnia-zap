@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -89,14 +90,21 @@ print(" ".join(s.text.strip() for s in segs).strip())
 
 func beatitudeAcharUV() string {
 	home, _ := os.UserHomeDir()
-	for _, c := range []string{
+	candidatos := []string{
 		filepath.Join(home, ".local", "bin", "uv"),
 		"/opt/homebrew/bin/uv",
 		"/usr/local/bin/uv",
-	} {
+	}
+	if runtime.GOOS == "windows" {
+		candidatos = []string{filepath.Join(home, ".local", "bin", "uv.exe")}
+	}
+	for _, c := range candidatos {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
+	}
+	if p, err := exec.LookPath("uv"); err == nil {
+		return p
 	}
 	return ""
 }

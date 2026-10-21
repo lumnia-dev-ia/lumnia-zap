@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Lumnia Zap — pacote MSIX (fase 1: teste, fora da Store, certificado de teste).
-  Gerado por scripts/build-msix.sh; @VERSAO@ e @PUBLISHER@ sao preenchidos la.
+  Gerado por scripts/build-msix.sh; @NAME@, @PUBLISHER@, @PUBLISHER_DISPLAY@ e @VERSAO@ sao preenchidos la
+  (certificado de teste ou identidade da Store).
   O Publisher precisa ser IDENTICO ao assunto do certificado que assina.
 -->
 <Package
@@ -12,11 +13,11 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap uap3 desktop rescap">
 
-  <Identity Name="Lumnia.LumniaZap" Publisher="@PUBLISHER@" Version="@VERSAO@" ProcessorArchitecture="x64" />
+  <Identity Name="@NAME@" Publisher="@PUBLISHER@" Version="@VERSAO@" ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>Lumnia Zap</DisplayName>
-    <PublisherDisplayName>Lumnia</PublisherDisplayName>
+    <PublisherDisplayName>@PUBLISHER_DISPLAY@</PublisherDisplayName>
     <Logo>assets\StoreLogo.png</Logo>
     <Description>Ponte local entre o seu WhatsApp e o Claude.</Description>
   </Properties>

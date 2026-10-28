@@ -73,6 +73,11 @@ apt-get install -y --no-install-recommends \
 # ------------------------------------------------------------------ usuário
 passo "Usuário $USUARIO"
 id "$USUARIO" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USUARIO"
+# Se a pasta já existia (criada à mão como root antes deste script), o useradd -m não
+# a cria nem troca o dono — e aí a senha da tela e o uv falham com "Permission denied".
+# Garante que a casa é da pessoa, sempre.
+install -d -o "$USUARIO" -g "$USUARIO" "$CASA"
+chown -R "$USUARIO:$USUARIO" "$CASA"
 usermod -aG ssl-cert "$USUARIO"
 loginctl enable-linger "$USUARIO" || true
 como() { sudo -u "$USUARIO" -H bash -lc "$*"; }

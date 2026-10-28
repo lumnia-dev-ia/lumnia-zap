@@ -5,7 +5,7 @@
 # instalar.sh — monta o computador do Beatitude na nuvem (Ubuntu 24.04).
 #
 # Roda como root, uma vez, no terminal do painel da Hostinger:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/lumnia-dev-ia/lumnia-zap/nuvem-linux/scripts/nuvem/instalar.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/lumnia-dev-ia/lumnia-zap/main/scripts/nuvem/instalar.sh)
 #
 # O que fica na máquina:
 #   - usuário `beatitude` (sem sudo), que roda tudo;
@@ -22,7 +22,7 @@ set -euo pipefail
 
 USUARIO=beatitude
 CASA=/home/$USUARIO
-BRANCH=${LUMNIA_BRANCH:-nuvem-linux}
+BRANCH=${LUMNIA_BRANCH:-main}
 PESSOA=${LUMNIA_PESSOA:-}   # ex.: LUMNIA_PESSOA="o Douglas" — nome usado nos avisos do verificador
 SUPORTE=${LUMNIA_SUPORTE_WHATSAPP:-}   # WhatsApp do suporte da Lumnia (só dígitos, com 55) — destino do botão "Liberar suporte"
 REPO=https://github.com/lumnia-dev-ia/lumnia-zap

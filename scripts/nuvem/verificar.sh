@@ -64,14 +64,14 @@ pgrep -u "$(id -u)" -f '/opt/google/chrome/chrome' >/dev/null \
   || caiu "chrome" "fechado" "$TELA e abrir o Chrome (ícone na área de trabalho). Conferir se a extensão Claude segue conectada."
 
 # 5. Claude Code logado
-resp=$(cd "$CASA" && timeout 120 claude -p "Responda só OK." --model haiku 2>&1 | tail -c 300)
+resp=$(cd "$CASA" && timeout 120 claude -p "Responda só OK." --model haiku </dev/null 2>&1 | tail -c 300)
 case $resp in
   *OK*) : ;;
   *) caiu "login do claude" "não respondeu" "Na tela, terminal: claude, depois /login com a conta de $PESSOA." ;;
 esac
 
 # 6. MCP do Beatitude
-mcp=$(cd "$CASA" && timeout 90 claude mcp list 2>/dev/null | grep -i '^beatitude' || true)
+mcp=$(cd "$CASA" && timeout 90 claude mcp list </dev/null 2>/dev/null | grep -i '^beatitude' || true)
 case $mcp in
   *Connected*|*✓*) : ;;
   "") caiu "mcp beatitude" "não está configurado" "Na tela, terminal: claude mcp add --scope user --transport http beatitude https://beatitude.lumnia.dev/mcp e autorizar." ;;

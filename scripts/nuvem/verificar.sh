@@ -122,7 +122,9 @@ else:
             itens.append({"peca": p[0][:40], "estado": p[1][:80], "fazer": p[2][:300]})
     corpo = {"maquina": "Computador na nuvem (" + socket.gethostname() + ")", "versao": versao, "itens": itens[:10]}
 req = urllib.request.Request(url, data=json.dumps(corpo).encode(), method="POST",
-    headers={"Content-Type": "application/json", "Authorization": "Bearer " + cfg["token"]})
+    # User-Agent próprio: o firewall do site recusa o "Python-urllib" padrão (403).
+    headers={"Content-Type": "application/json", "Authorization": "Bearer " + cfg["token"],
+             "User-Agent": "lumnia-zap-verificador/1 (" + versao + ")"})
 try:
     print("alerta:", urllib.request.urlopen(req, timeout=30).read().decode())
 except Exception as e:

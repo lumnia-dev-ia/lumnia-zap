@@ -224,17 +224,44 @@ WantedBy=timers.target
 UNIT
 chmod +x "$DESTINO/scripts/nuvem/rotina-manha.sh"
 
+# Verificador: a cada 12 h confere as peças e avisa o administrador por e-mail.
+cat > /etc/systemd/system/lumnia-verificar.service <<UNIT
+[Unit]
+Description=Beatitude: verificador do computador (avisa por e-mail se algo cair)
+After=network-online.target lumnia-zap.service
+
+[Service]
+Type=oneshot
+User=$USUARIO
+Environment=HOME=$CASA
+Environment=DISPLAY=:1
+ExecStart=$DESTINO/scripts/nuvem/verificar.sh
+UNIT
+
+cat > /etc/systemd/system/lumnia-verificar.timer <<UNIT
+[Unit]
+Description=Beatitude: verificador às 8h10 e 20h10
+
+[Timer]
+OnCalendar=*-*-* 08,20:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+chmod +x "$DESTINO/scripts/nuvem/verificar.sh"
+
 # O terminal da tela não é shell de login: o PATH vai no .bashrc.
 grep -q 'lumnia: PATH' "$CASA/.bashrc" 2>/dev/null || \
   echo 'export PATH="$HOME/.local/bin:/usr/local/go/bin:$PATH" # lumnia: PATH' >> "$CASA/.bashrc"
 
 systemctl daemon-reload
-systemctl enable lumnia-tela.service lumnia-zap.service lumnia-manha.timer
+systemctl enable lumnia-tela.service lumnia-zap.service lumnia-manha.timer lumnia-verificar.timer
 # A tela só reinicia se estiver parada: reiniciar derruba a sessão (e o Chrome) da pessoa.
 systemctl is-active --quiet lumnia-tela.service || systemctl restart lumnia-tela.service
 sleep 3
 systemctl restart lumnia-zap.service
-systemctl start lumnia-manha.timer
+systemctl start lumnia-manha.timer lumnia-verificar.timer
 
 # ------------------------------------------------------------------ conferência
 passo "Conferindo"
@@ -246,6 +273,7 @@ systemctl is-active --quiet lumnia-zap && ok "Zap no ar" || falha "Zap parado (t
 curl -fsS -o /dev/null http://127.0.0.1:8080/ && ok "painel do Zap responde" || falha "painel do Zap não respondeu ainda"
 como 'test -x ~/.local/bin/claude' && ok "Claude Code instalado" || falha "Claude Code ausente"
 systemctl is-active --quiet lumnia-manha.timer && ok "rodada da manhã agendada ($(systemctl show -p NextElapseUSecRealtime --value lumnia-manha.timer))" || falha "rodada da manhã sem agendamento"
+systemctl is-active --quiet lumnia-verificar.timer && ok "verificador agendado ($(systemctl show -p NextElapseUSecRealtime --value lumnia-verificar.timer))" || falha "verificador sem agendamento"
 IP=$(curl -fsS https://api.ipify.org || hostname -I | awk '{print $1}')
 echo
 echo "Pronto. A tela abre em https://$IP:$PORTA_TELA (usuário $USUARIO e a senha escolhida)."

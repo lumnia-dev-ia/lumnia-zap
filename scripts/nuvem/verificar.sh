@@ -24,6 +24,8 @@ export PATH="$CASA/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export DISPLAY=${DISPLAY:-:1}
 PAINEL=http://127.0.0.1:8080
 MODO=${1:-}
+# Nome da pessoa dona da máquina (gravado pelo instalar.sh em ~/.config/lumnia/pessoa).
+PESSOA=$(cat "$CASA/.config/lumnia/pessoa" 2>/dev/null || echo "a pessoa")
 
 ITENS=$(mktemp)
 trap 'rm -f "$ITENS"' EXIT
@@ -43,8 +45,8 @@ else
   else
     conectado=$(printf '%s' "$st" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("sim" if d.get("connected") and not d.get("needs_pair") else ("qr" if d.get("needs_pair") else "nao"))' 2>/dev/null || echo nao)
     case $conectado in
-      qr)  caiu "whatsapp" "pede novo pareamento" "$TELA; em localhost:8080 clicar Reconectar e a Lisiane lê o QR no celular (Aparelhos conectados)." ;;
-      nao) caiu "whatsapp" "desconectado" "$TELA; em localhost:8080 clicar Reconectar. Se pedir QR, a Lisiane lê no celular." ;;
+      qr)  caiu "whatsapp" "pede novo pareamento" "$TELA; em localhost:8080 clicar Reconectar e $PESSOA lê o QR no celular (Aparelhos conectados)." ;;
+      nao) caiu "whatsapp" "desconectado" "$TELA; em localhost:8080 clicar Reconectar. Se pedir QR, $PESSOA lê no celular." ;;
     esac
   fi
   # 3. Beatitude ligado e Claude achado pela ponte
@@ -65,7 +67,7 @@ pgrep -u "$(id -u)" -f '/opt/google/chrome/chrome' >/dev/null \
 resp=$(cd "$CASA" && timeout 120 claude -p "Responda só OK." --model haiku 2>&1 | tail -c 300)
 case $resp in
   *OK*) : ;;
-  *) caiu "login do claude" "não respondeu" "Na tela, terminal: claude, depois /login com a conta da Lisiane." ;;
+  *) caiu "login do claude" "não respondeu" "Na tela, terminal: claude, depois /login com a conta de $PESSOA." ;;
 esac
 
 # 6. MCP do Beatitude
@@ -73,7 +75,7 @@ mcp=$(cd "$CASA" && timeout 90 claude mcp list 2>/dev/null | grep -i '^beatitude
 case $mcp in
   *Connected*|*✓*) : ;;
   "") caiu "mcp beatitude" "não está configurado" "Na tela, terminal: claude mcp add --scope user --transport http beatitude https://beatitude.lumnia.dev/mcp e autorizar." ;;
-  *) caiu "mcp beatitude" "sem conexão ou sem autorização" "Na tela, terminal: claude, depois /mcp, escolher beatitude e Autenticar com a conta da Lisiane." ;;
+  *) caiu "mcp beatitude" "sem conexão ou sem autorização" "Na tela, terminal: claude, depois /mcp, escolher beatitude e Autenticar com a conta de $PESSOA." ;;
 esac
 
 # 7. Rodada da manhã
@@ -99,9 +101,9 @@ echo "$(date '+%F %T') verificar falhas=$n $(cut -f1 "$ITENS" | paste -sd, -)" >
 [ "$MODO" != "--teste" ] && [ "$n" = 0 ] && exit 0
 
 # Aviso pelo servidor do Beatitude
-python3 - "$STORE/beatitude-ponte.json" "$ITENS" "$MODO" <<'PY'
+python3 - "$STORE/beatitude-ponte.json" "$ITENS" "$MODO" "$PESSOA" <<'PY'
 import json, sys, socket, urllib.request
-cfg_path, itens_path, modo = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg_path, itens_path, modo, pessoa = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 try:
     cfg = json.load(open(cfg_path))
 except Exception:
@@ -113,14 +115,14 @@ try:
 except Exception:
     pass
 if modo == "--teste":
-    corpo = {"teste": True, "maquina": "Computador na nuvem (" + socket.gethostname() + ")", "versao": versao}
+    corpo = {"teste": True, "maquina": "Computador na nuvem de " + pessoa + " (" + socket.gethostname() + ")", "versao": versao}
 else:
     itens = []
     for linha in open(itens_path, encoding="utf-8"):
         p = linha.rstrip("\n").split("\t")
         if len(p) == 3:
             itens.append({"peca": p[0][:40], "estado": p[1][:80], "fazer": p[2][:300]})
-    corpo = {"maquina": "Computador na nuvem (" + socket.gethostname() + ")", "versao": versao, "itens": itens[:10]}
+    corpo = {"maquina": "Computador na nuvem de " + pessoa + " (" + socket.gethostname() + ")", "versao": versao, "itens": itens[:10]}
 req = urllib.request.Request(url, data=json.dumps(corpo).encode(), method="POST",
     # User-Agent próprio: o firewall do site recusa o "Python-urllib" padrão (403).
     headers={"Content-Type": "application/json", "Authorization": "Bearer " + cfg["token"],

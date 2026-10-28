@@ -23,6 +23,7 @@ set -euo pipefail
 USUARIO=beatitude
 CASA=/home/$USUARIO
 BRANCH=${LUMNIA_BRANCH:-nuvem-linux}
+PESSOA=${LUMNIA_PESSOA:-}   # ex.: LUMNIA_PESSOA="o Douglas" — nome usado nos avisos do verificador
 REPO=https://github.com/lumnia-dev-ia/lumnia-zap
 DESTINO=$CASA/lumnia-zap
 GO_VERSAO=1.25.0
@@ -48,6 +49,12 @@ if [ ! -f "$CASA/.kasmpasswd" ]; then
   done
 fi
 
+# ------------------------------------------------------------------ pessoa
+if [ -z "$PESSOA" ] && [ ! -f "$CASA/.config/lumnia/pessoa" ]; then
+  echo
+  read -rp "De quem é este computador? (com artigo, ex.: \"a Lisiane\", \"o Douglas\"): " PESSOA
+fi
+
 # ------------------------------------------------------------------ base
 passo "Fuso, swap e pacotes do sistema"
 timedatectl set-timezone America/Sao_Paulo || true
@@ -69,6 +76,12 @@ id "$USUARIO" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USUARIO"
 usermod -aG ssl-cert "$USUARIO"
 loginctl enable-linger "$USUARIO" || true
 como() { sudo -u "$USUARIO" -H bash -lc "$*"; }
+
+if [ -n "$PESSOA" ]; then
+  install -d -o "$USUARIO" -g "$USUARIO" "$CASA/.config/lumnia"
+  printf '%s\n' "$PESSOA" > "$CASA/.config/lumnia/pessoa"
+  chown "$USUARIO:$USUARIO" "$CASA/.config/lumnia/pessoa"
+fi
 
 # ------------------------------------------------------------------ Chrome
 passo "Google Chrome"

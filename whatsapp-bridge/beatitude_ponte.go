@@ -272,7 +272,7 @@ func ponteAprovar(texto string) {
 	if err != nil {
 		switch status {
 		case http.StatusUnauthorized:
-			beatitudeSend(beatitudeMarca + ": este Mac não está mais ligado ao app Beatitude. Ligue de novo no painel do Lumnia Zap.")
+			beatitudeSend(beatitudeMarca + ": este " + maquina() + " não está mais ligado ao app Beatitude. Ligue de novo no painel do Lumnia Zap.")
 		case http.StatusNotFound:
 			beatitudeSend(fmt.Sprintf("%s: não achei a ação %d.", beatitudeMarca, n))
 		case http.StatusConflict:

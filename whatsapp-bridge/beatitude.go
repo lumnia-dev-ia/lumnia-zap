@@ -394,7 +394,7 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 
 	claude, err := beatitudeAcharClaude()
 	if err != nil {
-		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste Mac. Abra o painel do Lumnia Zap para ver como instalar.")
+		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste " + maquina() + ". Abra o painel do Lumnia Zap para ver como instalar.")
 		beatitudeRegistrar(time.Now(), pedido, "", "erro", err.Error())
 		return
 	}
@@ -451,7 +451,7 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 	agora := time.Now().In(panelLoc).Format("Monday, 02/01/2006 15:04")
 
 	sistema := strings.Join([]string{
-		"Você é o mordomo do Beatitude, rodando no Mac da pessoa, chamado pelo grupo de WhatsApp \"Beatitude\" que ela usa para falar com você de qualquer lugar.",
+		"Você é o mordomo do Beatitude, rodando no " + maquina() + " da pessoa, chamado pelo grupo de WhatsApp \"Beatitude\" que ela usa para falar com você de qualquer lugar.",
 		"Responda em português do Brasil, em segunda pessoa, sem elogio, sem hype e sem exclamação. Curto: a resposta vai ser lida no celular.",
 		"Formatação de WhatsApp: *negrito* com um asterisco, listas com hífen. Nada de títulos com #, nada de tabelas.",
 		"Você só LÊ. Não existe ferramenta de envio para você. O que você escrever na resposta final é o que a ponte vai mandar ao grupo, e só ao grupo.",
@@ -645,7 +645,7 @@ func beatitudeExecClaudeMedido(claude, prompt, sistema string, extra, liberadas,
 		beatitude.mu.Unlock()
 	}
 	if r.IsError && strings.Contains(r.Result, "Not logged in") {
-		return "", medida, fmt.Errorf("o Claude Code deste Mac não está logado; abra o Terminal, rode claude e entre com a sua conta")
+		return "", medida, fmt.Errorf("o Claude Code deste %s não está logado; abra o Terminal, rode claude e entre com a sua conta", maquina())
 	}
 	if r.IsError || strings.TrimSpace(r.Result) == "" {
 		return "", medida, fmt.Errorf("Claude devolveu erro (%s): %s", r.Subtype, beatitudeCurto(r.Result+" "+erro.String(), 300))
@@ -705,7 +705,7 @@ func beatitudeAcharClaude() (string, error) {
 	// ultimo recurso: o shell de login da pessoa (launchd tem PATH minimo)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "/bin/zsh", "-lic", "command -v claude").Output()
+	out, err := exec.CommandContext(ctx, shellDeLogin(), "-lic", "command -v claude").Output()
 	if err == nil {
 		linhas := strings.Split(strings.TrimSpace(string(out)), "\n")
 		if p := strings.TrimSpace(linhas[len(linhas)-1]); strings.HasPrefix(p, "/") {
@@ -1171,7 +1171,7 @@ func beatitudeLigarHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	panel.logger.Infof("Beatitude: modulo LIGADO no grupo %s", req.GrupoJID)
 	beatitudeTranscritorAquecer()
-	go beatitudeSend(beatitudeMarca + ": ligado neste Mac. Escreva aqui o que precisa, por exemplo \"pendentes\" ou \"temas\". Pode mandar por texto ou áudio. Eu leio e respondo neste grupo; mensagem para outra pessoa só sai quando você responde *envia* com o número do rascunho, ou *sim* com o número de uma ação do app (por exemplo, *sim 3*).")
+	go beatitudeSend(beatitudeMarca + ": ligado neste " + maquina() + ". Escreva aqui o que precisa, por exemplo \"pendentes\" ou \"temas\". Pode mandar por texto ou áudio. Eu leio e respondo neste grupo; mensagem para outra pessoa só sai quando você responde *envia* com o número do rascunho, ou *sim* com o número de uma ação do app (por exemplo, *sim 3*).")
 	writeJSON(w, map[string]interface{}{"ok": true})
 }
 

@@ -64,7 +64,7 @@ func beatitudeContextoPronto(grupo, pedido string) string {
 	if len(partes) == 0 {
 		return ""
 	}
-	return "Contexto pronto (lido pela ponte neste Mac agora; use antes de chamar ferramentas):\n\n" +
+	return "Contexto pronto (lido pela ponte neste " + maquina() + " agora; use antes de chamar ferramentas):\n\n" +
 		strings.Join(partes, "\n\n")
 }
 

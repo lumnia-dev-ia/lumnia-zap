@@ -66,9 +66,9 @@ func beatitudeSepararNavegador(resposta string) (string, string) {
 	if _, err := panel.store.db.Exec(`INSERT INTO beatitude_navegador (tarefa, criado_em) VALUES (?, ?)`, tarefa, time.Now()); err != nil {
 		return visivel, ""
 	}
-	return visivel, "Posso abrir o Chrome deste Mac e fazer isto:\n\n" + tarefa +
+	return visivel, "Posso abrir o Chrome deste " + maquina() + " e fazer isto:\n\n" + tarefa +
 		"\n\nEu paro antes de pagar, assinar, aceitar termos, digitar senha ou enviar algo definitivo; essa parte fica com você. " +
-		"O Chrome precisa estar aberto no Mac, com a extensão do Claude. Responda *abre* para eu começar."
+		"O Chrome precisa estar aberto no " + maquina() + ", com a extensão do Claude. Responda *abre* para eu começar."
 }
 
 func beatitudeNavPendente() (int64, string) {
@@ -106,14 +106,15 @@ func beatitudeExecutarNavegador(id int64) {
 
 	claude, err := beatitudeAcharClaude()
 	if err != nil {
-		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste Mac.")
+		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste " + maquina() + ".")
 		return
 	}
 	beatitudeSend(beatitudeMarca + ": abrindo o Chrome. Te aviso aqui quando terminar ou se precisar de você.")
 
 	agora := time.Now().In(panelLoc).Format("Monday, 02/01/2006 15:04")
 	sistema := strings.Join([]string{
-		"Você é o mordomo do Beatitude, no Mac da pessoa, usando o Chrome dela pela extensão Claude in Chrome.",
+		"Você é o mordomo do Beatitude, no " + maquina() + " da pessoa, usando o Chrome dela pela extensão Claude in Chrome.",
+		"Use SÓ o Chrome deste " + maquina() + ": se houver mais de um navegador conectado à conta, liste os conectados e selecione o que roda em " + sistemaDoNavegador() + ", sem perguntar. Se nenhum for " + sistemaDoNavegador() + ", pare e avise que o Chrome deste " + maquina() + " não está conectado.",
 		"Faça SÓ a tarefa aprovada abaixo. Não amplie o escopo.",
 		"Pare antes de: pagar ou informar dados de cartão; digitar senha ou criar conta; aceitar termos; assinar; enviar mensagem a alguém; confirmar compra, reserva paga ou qualquer coisa irreversível. Nesses pontos, deixe a página pronta e diga exatamente o que falta ela fazer e em qual aba.",
 		"Se o site pedir login e ela não estiver logada, pare e avise.",
@@ -130,7 +131,7 @@ func beatitudeExecutarNavegador(id int64) {
 	if err != nil {
 		msg := beatitudeCurto(err.Error(), 200)
 		if strings.Contains(strings.ToLower(msg), "chrome") || strings.Contains(strings.ToLower(msg), "extension") {
-			msg += ". Confira se o Chrome está aberto no Mac com a extensão do Claude conectada"
+			msg += ". Confira se o Chrome está aberto no " + maquina() + " com a extensão do Claude conectada"
 		}
 		beatitudeSend(beatitudeMarca + ": não consegui terminar no navegador (" + msg + ").")
 		beatitudeRegistrarMedido(inicio, "navegador: "+beatitudeCurto(tarefa, 80), "", "erro", err.Error(), &m)

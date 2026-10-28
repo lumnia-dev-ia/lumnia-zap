@@ -24,6 +24,7 @@ USUARIO=beatitude
 CASA=/home/$USUARIO
 BRANCH=${LUMNIA_BRANCH:-nuvem-linux}
 PESSOA=${LUMNIA_PESSOA:-}   # ex.: LUMNIA_PESSOA="o Douglas" — nome usado nos avisos do verificador
+SUPORTE=${LUMNIA_SUPORTE_WHATSAPP:-}   # WhatsApp do suporte da Lumnia (só dígitos, com 55) — destino do botão "Liberar suporte"
 REPO=https://github.com/lumnia-dev-ia/lumnia-zap
 DESTINO=$CASA/lumnia-zap
 GO_VERSAO=1.25.0
@@ -68,7 +69,8 @@ apt-get install -y --no-install-recommends \
   xfce4 xfce4-terminal xfce4-goodies dbus-x11 xdg-utils fonts-noto fonts-noto-color-emoji \
   build-essential git curl ca-certificates wget gnupg jq sqlite3 ffmpeg ssl-cert \
   unattended-upgrades libdatetime-perl libyaml-tiny-perl libhash-merge-simple-perl \
-  liblist-moreutils-perl libswitch-perl libtry-tiny-perl
+  liblist-moreutils-perl libswitch-perl libtry-tiny-perl \
+  zenity xclip libnotify-bin libglib2.0-bin gvfs
 
 # ------------------------------------------------------------------ usuário
 passo "Usuário $USUARIO"
@@ -86,6 +88,11 @@ if [ -n "$PESSOA" ]; then
   install -d -o "$USUARIO" -g "$USUARIO" "$CASA/.config/lumnia"
   printf '%s\n' "$PESSOA" > "$CASA/.config/lumnia/pessoa"
   chown "$USUARIO:$USUARIO" "$CASA/.config/lumnia/pessoa"
+fi
+if [ -n "$SUPORTE" ]; then
+  install -d -o "$USUARIO" -g "$USUARIO" "$CASA/.config/lumnia"
+  printf '%s\n' "$SUPORTE" | tr -dc '0-9\n' > "$CASA/.config/lumnia/suporte_para"
+  chown "$USUARIO:$USUARIO" "$CASA/.config/lumnia/suporte_para"
 fi
 
 # ------------------------------------------------------------------ Chrome
@@ -171,6 +178,34 @@ VERSAO=$(como "git -C '$DESTINO' log -1 --format=%h")
 como "cd '$DESTINO/whatsapp-bridge' && CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath \
   -ldflags='-X main.versao=nuvem-$VERSAO' -o whatsapp-bridge ."
 como "cd '$DESTINO/whatsapp-mcp-server' && ~/.local/bin/uv sync -q"
+
+# ------------------------------------------------------------------ botão de suporte (da máquina, não do Zap)
+passo "Ícones Liberar suporte / Encerrar suporte"
+# Programa da máquina, do root: a pessoa executa, não altera.
+install -o root -g root -m 0755 "$DESTINO/scripts/nuvem/suporte.sh" /usr/local/bin/lumnia-suporte
+MESA=$CASA/Desktop
+install -d -o "$USUARIO" -g "$USUARIO" "$MESA" "$CASA/.config/autostart"
+icone() { # arquivo nome comando ícone comentário
+  printf '[Desktop Entry]\nType=Application\nName=%s\nComment=%s\nExec=/usr/local/bin/lumnia-suporte %s\nIcon=%s\nTerminal=false\n' \
+    "$2" "$5" "$3" "$4" > "$MESA/$1"
+  chmod 0755 "$MESA/$1"; chown "$USUARIO:$USUARIO" "$MESA/$1"
+  # Xfce 4.18 pede confirmação para atalho "não confiável"; marca como confiável (precisa do gvfs).
+  sudo -u "$USUARIO" -H dbus-launch gio set -t string "$MESA/$1" metadata::xfce-exe-checksum \
+    "$(sha256sum "$MESA/$1" | cut -d' ' -f1)" 2>/dev/null || true
+}
+icone lumnia-suporte-liberar.desktop "Liberar suporte" liberar help-browser \
+  "Cria um acesso temporário (2 h) para o suporte da Lumnia"
+icone lumnia-suporte-encerrar.desktop "Encerrar suporte" encerrar process-stop \
+  "Apaga o acesso de suporte agora"
+# Ao abrir a tela (inclusive depois de reiniciar), apaga acesso de suporte vencido.
+printf '[Desktop Entry]\nType=Application\nName=Beatitude: limpar suporte vencido\nExec=/usr/local/bin/lumnia-suporte limpar\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n' \
+  > "$CASA/.config/autostart/lumnia-suporte-limpar.desktop"
+chown -R "$USUARIO:$USUARIO" "$CASA/.config/autostart"
+# Endereço que vai na mensagem de suporte
+IP_TELA=$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+install -d -o "$USUARIO" -g "$USUARIO" "$CASA/.config/lumnia"
+[ -s "$CASA/.config/lumnia/endereco" ] || echo "https://$IP_TELA:$PORTA_TELA" > "$CASA/.config/lumnia/endereco"
+chown -R "$USUARIO:$USUARIO" "$CASA/.config/lumnia"
 
 # ------------------------------------------------------------------ serviços
 passo "Serviços do sistema"
@@ -297,3 +332,5 @@ echo
 echo "Pronto. A tela abre em https://$IP:$PORTA_TELA (usuário $USUARIO e a senha escolhida)."
 echo "O certificado é próprio: o navegador vai avisar na primeira vez."
 echo "Dentro da tela: Chrome já aberto; painel do Zap em http://localhost:8080."
+echo "Ícones na área de trabalho: Liberar suporte / Encerrar suporte."
+[ -s "$CASA/.config/lumnia/suporte_para" ] || echo "Atenção: sem LUMNIA_SUPORTE_WHATSAPP, o botão só copia a mensagem (não manda pelo WhatsApp)."

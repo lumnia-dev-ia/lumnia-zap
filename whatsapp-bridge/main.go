@@ -187,8 +187,74 @@ func extractTextContent(msg *waProto.Message) string {
 		return extendedText.GetText()
 	}
 
-	// For now, we're ignoring non-text messages
+	// Cartão de contato (vCard), um ou vários
+	if c := msg.GetContactMessage(); c != nil {
+		return formatContactCard(c.GetDisplayName(), c.GetVcard())
+	}
+	if arr := msg.GetContactsArrayMessage(); arr != nil {
+		var parts []string
+		for _, c := range arr.GetContacts() {
+			if line := formatContactCard(c.GetDisplayName(), c.GetVcard()); line != "" {
+				parts = append(parts, line)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+
 	return ""
+}
+
+// formatContactCard transforma um contato compartilhado (nome + vCard) numa
+// linha de texto que o MCP consegue ler, por exemplo:
+// "[contato] Fulano — +55 11 99999-9999 (WhatsApp: 5511999999999)".
+func formatContactCard(displayName, vcard string) string {
+	name := strings.TrimSpace(displayName)
+	var phones []string
+	for _, raw := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(raw)
+		colon := strings.Index(line, ":")
+		if colon < 0 {
+			continue
+		}
+		key, value := line[:colon], strings.TrimSpace(line[colon+1:])
+		// tira o prefixo de agrupamento, como "item1."
+		if dot := strings.Index(key, "."); dot > 0 && !strings.Contains(key[:dot], ";") {
+			key = key[dot+1:]
+		}
+		upper := strings.ToUpper(key)
+		switch {
+		case name == "" && (upper == "FN" || strings.HasPrefix(upper, "FN;")):
+			name = value
+		case upper == "TEL" || strings.HasPrefix(upper, "TEL;"):
+			waid := ""
+			for _, param := range strings.Split(key, ";")[1:] {
+				if kv := strings.SplitN(param, "=", 2); len(kv) == 2 && strings.EqualFold(kv[0], "waid") {
+					waid = kv[1]
+				}
+			}
+			entry := value
+			if waid != "" {
+				if entry == "" {
+					entry = "+" + waid
+				}
+				entry += " (WhatsApp: " + waid + ")"
+			}
+			if entry != "" {
+				phones = append(phones, entry)
+			}
+		}
+	}
+	if name == "" && len(phones) == 0 {
+		return ""
+	}
+	if name == "" {
+		name = "sem nome"
+	}
+	out := "[contato] " + name
+	if len(phones) > 0 {
+		out += " — " + strings.Join(phones, ", ")
+	}
+	return out
 }
 
 // SendMessageResponse represents the response for the send message API
@@ -1170,11 +1236,7 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 				// Extract text content
 				var content string
 				if msg.Message.Message != nil {
-					if conv := msg.Message.Message.GetConversation(); conv != "" {
-						content = conv
-					} else if ext := msg.Message.Message.GetExtendedTextMessage(); ext != nil {
-						content = ext.GetText()
-					}
+					content = extractTextContent(msg.Message.Message)
 				}
 
 				// Extract media info

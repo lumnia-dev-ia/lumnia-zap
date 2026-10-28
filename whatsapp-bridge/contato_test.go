@@ -40,3 +40,10 @@ func TestExtractTextContentContacts(t *testing.T) {
 		t.Fatalf("vários contatos: %q", got)
 	}
 }
+
+func TestFormatContactCardEspacos(t *testing.T) {
+	got := formatContactCard("Cristiano  Pires ", "BEGIN:VCARD\nTEL;waid=5511971306657:+55 11 97130-6657\nEND:VCARD")
+	if got != "[contato] Cristiano Pires — +55 11 97130-6657 (WhatsApp: 5511971306657)" {
+		t.Fatalf("got %q", got)
+	}
+}

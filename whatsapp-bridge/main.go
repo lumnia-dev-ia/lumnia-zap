@@ -208,7 +208,7 @@ func extractTextContent(msg *waProto.Message) string {
 // linha de texto que o MCP consegue ler, por exemplo:
 // "[contato] Fulano — +55 11 99999-9999 (WhatsApp: 5511999999999)".
 func formatContactCard(displayName, vcard string) string {
-	name := strings.TrimSpace(displayName)
+	name := strings.Join(strings.Fields(displayName), " ")
 	var phones []string
 	for _, raw := range strings.Split(strings.ReplaceAll(vcard, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(raw)
@@ -224,7 +224,7 @@ func formatContactCard(displayName, vcard string) string {
 		upper := strings.ToUpper(key)
 		switch {
 		case name == "" && (upper == "FN" || strings.HasPrefix(upper, "FN;")):
-			name = value
+			name = strings.Join(strings.Fields(value), " ")
 		case upper == "TEL" || strings.HasPrefix(upper, "TEL;"):
 			waid := ""
 			for _, param := range strings.Split(key, ";")[1:] {

@@ -85,7 +85,7 @@ fi
 passo "KasmVNC (a tela no navegador)"
 if ! dpkg -s kasmvncserver >/dev/null 2>&1; then
   URL=$(curl -fsSL https://api.github.com/repos/kasmtech/KasmVNC/releases/latest \
-    | jq -r '.assets[].browser_download_url' | grep -E 'kasmvncserver_noble_.*_amd64\.deb$' | head -1)
+    | jq -r '.assets[].browser_download_url' | grep -E 'kasmvncserver_(ubuntu_)?noble_.*_amd64\.deb$' | head -1 || true)
   [ -n "$URL" ] || { echo "Não achei o pacote do KasmVNC para noble."; exit 1; }
   wget -qO /tmp/kasmvnc.deb "$URL"
   apt-get install -y /tmp/kasmvnc.deb

@@ -26,7 +26,24 @@ const (
 )
 
 var beatitudeNavBlocoRe = regexp.MustCompile(`(?s)<navegador>\s*(.*?)\s*</navegador>`)
-var beatitudeNavAprovaRe = regexp.MustCompile(`(?is)^\s*(abre|abrir|pode abrir|abre o navegador|abre o chrome|pode fazer|faz|vai|pode ir)\s*[.!]?\s*$`)
+var beatitudeNavAprovaRe = regexp.MustCompile(`(?is)^\s*(abre|abrir|pode abrir|abre o navegador|abre o chrome|pode fazer|faz|vai|pode ir|autorizad[oa]|autorizo)\s*[.!]?\s*$`)
+
+// Autorizacao com palavras a mais ("abre e autorizado", "pode abrir, obrigada"):
+// comeca por um verbo de autorizacao, e curta e nao tem negacao nem adiamento.
+// Fica de fora o que pareca um pedido novo (texto longo).
+var beatitudeNavAprovaSoltaRe = regexp.MustCompile(`(?is)^\s*(abre|abrir|abra|pode abrir|autoriz\p{L}*|pode fazer|pode ir)\b`)
+var beatitudeNavNegaRe = regexp.MustCompile(`(?i)(^|[^\p{L}])(n[aã]o|nunca|cancela\p{L}*|espera|depois|amanh[aã]|ainda)([^\p{L}]|$)`)
+
+func beatitudeAprovaNavegadorTexto(texto string) bool {
+	t := strings.TrimSpace(texto)
+	if beatitudeNavAprovaRe.MatchString(t) {
+		return true
+	}
+	if len([]rune(t)) > 40 || beatitudeNavNegaRe.MatchString(t) {
+		return false
+	}
+	return beatitudeNavAprovaSoltaRe.MatchString(t)
+}
 
 var beatitudeNavLiberadas = []string{
 	"mcp__claude-in-chrome",
@@ -90,7 +107,7 @@ func beatitudeEhAprovacaoNavegador(texto string) bool {
 	if id == 0 {
 		return false
 	}
-	if beatitudeNavAprovaRe.MatchString(texto) {
+	if beatitudeAprovaNavegadorTexto(texto) {
 		return true
 	}
 	return beatitudeSimRe.MatchString(texto) && beatitudePendentes(beatitudeJanelaResposta) == 0

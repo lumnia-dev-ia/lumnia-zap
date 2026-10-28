@@ -50,3 +50,19 @@ func TestMordomoMicrosoftSoLeituraERascunho(t *testing.T) {
 		}
 	}
 }
+
+func TestAprovacaoDoNavegador(t *testing.T) {
+	sim := []string{"abre", "Abre e autorizado", "pode abrir, obrigada", "autorizado", "Autorizo!", "abre por favor"}
+	nao := []string{"não abre", "abre amanhã", "espera", "abre o whatsapp do João e manda que eu chego às 19h no jantar",
+		"cancela", "ainda não", "marca jantar sexta"}
+	for _, s := range sim {
+		if !beatitudeAprovaNavegadorTexto(s) {
+			t.Errorf("deveria aprovar: %q", s)
+		}
+	}
+	for _, s := range nao {
+		if beatitudeAprovaNavegadorTexto(s) {
+			t.Errorf("não deveria aprovar: %q", s)
+		}
+	}
+}

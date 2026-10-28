@@ -82,6 +82,22 @@ var beatitudeFerramentasLiberadas = []string{
 	"mcp__claude_ai_Google_Calendar",
 	"mcp__claude_ai_Gmail",
 	"mcp__claude_ai_Google_Drive",
+	// Microsoft 365 pelo conector da conta Claude (quem entra com Microsoft):
+	// ler e-mail, agenda e pessoas; deixar RASCUNHO; criar/ajustar evento dela.
+	// Lista fechada, ferramenta por ferramenta: enviar, encaminhar, apagar,
+	// responder convite, regras e arquivos ficam de fora (negados por omissao).
+	"mcp__claude_ai_Microsoft_365__outlook_email_search",
+	"mcp__claude_ai_Microsoft_365__outlook_calendar_search",
+	"mcp__claude_ai_Microsoft_365__outlook_find_available_time",
+	"mcp__claude_ai_Microsoft_365__find_meeting_availability",
+	"mcp__claude_ai_Microsoft_365__read_resource",
+	"mcp__claude_ai_Microsoft_365__get_me",
+	"mcp__claude_ai_Microsoft_365__search_people",
+	"mcp__claude_ai_Microsoft_365__chat_message_search",
+	"mcp__claude_ai_Microsoft_365__outlook_create_draft",
+	"mcp__claude_ai_Microsoft_365__outlook_create_reply_draft",
+	"mcp__claude_ai_Microsoft_365__outlook_create_event",
+	"mcp__claude_ai_Microsoft_365__outlook_update_event",
 	"WebSearch", // pesquisa simples (horario, endereco, telefone)
 }
 
@@ -105,6 +121,13 @@ var beatitudeFerramentasNegadas = []string{
 	"mcp__claude_ai_Google_Drive__share_file", "mcp__claude_ai_Google_Drive__trash_file",
 	"mcp__claude_ai_Google_Drive__update_file", "mcp__claude_ai_Google_Drive__create_file",
 	"mcp__claude_ai_Google_Drive__copy_file",
+	// Microsoft 365: nada sai, nada some (redundante com a lista fechada acima)
+	"mcp__claude_ai_Microsoft_365__outlook_send_mail", "mcp__claude_ai_Microsoft_365__outlook_send_draft",
+	"mcp__claude_ai_Microsoft_365__outlook_forward_mail", "mcp__claude_ai_Microsoft_365__outlook_create_reply_all_draft",
+	"mcp__claude_ai_Microsoft_365__outlook_delete_event", "mcp__claude_ai_Microsoft_365__outlook_respond_to_event",
+	"mcp__claude_ai_Microsoft_365__outlook_trash_thread", "mcp__claude_ai_Microsoft_365__outlook_batch_delete_messages",
+	"mcp__claude_ai_Microsoft_365__outlook_delete_draft", "mcp__claude_ai_Microsoft_365__outlook_set_vacation",
+	"mcp__claude_ai_Microsoft_365__outlook_create_filter", "mcp__claude_ai_Microsoft_365__sharepoint_delete_item",
 }
 
 type beatitudeConfig struct {
@@ -464,6 +487,9 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"Agenda Google: você pode ler, criar e ajustar eventos da pessoa, SEMPRE sem convidados: convidar alguém é mandar algo a outra pessoa e precisa do sim dela. Evento \"com\" alguém (\"almoço com a Lisiane sábado 14h\") sai só na agenda dela; se ela quiser convidar, crie uma ação com criar_acao do Beatitude (canal convite, destino a pessoa) e diga em uma linha que o convite sai quando ela responder sim com o número que o Beatitude der. Confira conflito antes; havendo, crie mesmo assim só se ela tiver sido explícita, e avise do conflito. Duração padrão: almoço e jantar 1h30, reunião 1h, café 30 min. Não apague eventos.",
 		"Gmail: você pode ler e criar RASCUNHOS (nunca enviar). Quando ela pedir um e-mail, deixe o rascunho no Gmail e diga para quem ficou e o assunto.",
 		"Drive: só leitura, para achar e resumir arquivos.",
+		"Microsoft (quem usa Outlook): as mesmas regras do Google pelo conector Microsoft 365. Ler e-mail e agenda; e-mail só como RASCUNHO (outlook_create_draft ou outlook_create_reply_draft), nunca enviar; evento só na agenda dela e sem convidados (outlook_create_event, outlook_update_event). Use o Google ou o Microsoft conforme o que estiver conectado; se os dois estiverem, a agenda e o e-mail de trabalho costumam ser os do Microsoft.",
+		"Aprender com ela: quando ela contar algo durável sobre si ou sobre alguém do círculo, guarde no Beatitude NA HORA, na frase dela, sem interpretar: um fato da vida dela ou alguém novo do círculo -> gravar_perfil; um fato datado sobre uma pessoa -> gravar_fato_pessoa; uma regra fixa (\"com meu pai é ligação, não texto\") -> gravar_regra; uma data que importa -> registrar_marco; algo que ela quer fazer -> registrar_vontade. Depois diga numa linha só \"Guardei: ...\". Isso vai para o Caderno no Drive dela na escrita da madrugada. Não grave saúde clínica, valores, senhas, nem o que é de terceiros (o que outra pessoa disse numa conversa). Pergunta, pedido de tarefa ou desabafo do momento não é para guardar.",
+		"Caderno: se ela pedir para anotar no caderno, completar a nota de alguém ou do Eu (\"anota no meu caderno que...\", \"completa a nota da minha mãe\"), chame ler_roteiro('caderno') e siga. Antes de escrever um rascunho para alguém do círculo, chame ler_caderno com pessoa=<nome> e use o que a nota diz (como ela escreve para essa pessoa, do que a pessoa gosta, datas); o que está no caderno é a verdade dela, não invente além.",
 		"Navegador: você não usa o navegador neste passo. Se o pedido exigir um site (cadastro, reserva, formulário, consulta que pede login), NÃO tente; no fim da resposta proponha um bloco <navegador>{\"tarefa\":\"descrição completa e autocontida: site, o que fazer, quais dados dela usar e onde parar\"}</navegador>. A ponte mostra a tarefa e pede autorização; outro passo, com o Chrome, executa. Um bloco por resposta. Não escreva instruções de autorização no texto visível.",
 		"O pedido pode vir de um áudio transcrito: corrija o que a transcrição erra. \"arroba\" é @, \"ponto com\" é .com, \"ponto com ponto br\" é .com.br, e-mails ditos por partes devem ser remontados; nomes parecidos com contatos dela são esses contatos. Na dúvida sobre um nome, e-mail ou horário, pergunte em uma linha antes de agir.",
 		"Economia de rodadas: a ponte já leu o banco do WhatsApp e entrega no pedido um bloco \"Contexto pronto\" com as pessoas do círculo (nome e chat_jid), as conversas candidatas a pendente e as últimas mensagens de quem o pedido cita. Use esse bloco antes de qualquer ferramenta; chame list_messages só para uma conversa que não veio nele, e list_chats ou search_contacts só se o nome não aparecer. Não repita o que o bloco já tem.",

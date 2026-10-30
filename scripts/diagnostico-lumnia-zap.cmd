@@ -118,6 +118,28 @@ for /d %%P in ("%LOCALAPPDATA%\Packages\Claude_*") do (
   )
 )
 echo.
+echo [Claude da Microsoft Store, versoes recentes - Claude-Data]
+echo (e este o arquivo que essas versoes leem; os de cima podem estar certos e ignorados)
+dir /b "%LOCALAPPDATA%\Claude-Data" 2>nul
+if errorlevel 1 echo nenhuma pasta Claude-Data encontrada
+for /d %%P in ("%LOCALAPPDATA%\Claude-Data\*") do (
+  echo --- %%P
+  if exist "%%P\claude_desktop_config.json" (
+    type "%%P\claude_desktop_config.json"
+  ) else (
+    echo sem claude_desktop_config.json aqui
+  )
+)
+echo.
+echo [logs do Claude: sem mcp-server-lumnia-zap.log = o Claude nem tentou subir o servidor]
+echo (o conteudo nao e copiado aqui: esse log traz texto de conversas)
+dir "%LOCALAPPDATA%\Claude\logs" 2>nul
+dir "%APPDATA%\Claude\logs" 2>nul
+echo.
+echo [politicas da empresa para o Claude - vazio e o normal]
+reg query "HKLM\SOFTWARE\Policies\Claude" 2>nul
+reg query "HKCU\SOFTWARE\Policies\Claude" 2>nul
+echo.
 
 echo ----- 8. O uv foi instalado? -----
 if exist "%USERPROFILE%\.local\bin\uv.exe" (

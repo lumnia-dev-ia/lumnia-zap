@@ -67,12 +67,31 @@ func pastasMSIX(home string) []string {
 	return out
 }
 
+// pastasClaudeData devolve as pastas de dados do Claude da Microsoft Store em
+// versoes recentes (visto em 30/10/2026, num PC corporativo):
+//
+//	%LOCALAPPDATA%\Claude-Data\claude_<hash>\claude_desktop_config.json
+//
+// Essas versoes nao leem mais o caminho virtualizado de Packages nem o
+// %APPDATA%\Claude; gravar so neles deixa o Claude sem o lumnia-zap, sem
+// erro e sem log de MCP nenhum. Tambem aqui o <hash> nao e fixado.
+func pastasClaudeData(home string) []string {
+	encontradas, _ := filepath.Glob(filepath.Join(pastaLocal(home), "Claude-Data", "*"))
+	var out []string
+	for _, p := range encontradas {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // claudeInstalado diz se achamos o Claude Desktop nesta maquina, cobrindo as
 // duas formas de distribuicao (instalador classico e Microsoft Store). E so
 // uma checagem informativa — nunca bloqueia a instalacao, porque a lista de
 // caminhos envelhece.
 func claudeInstalado(home string) bool {
-	if len(pastasMSIX(home)) > 0 {
+	if len(pastasMSIX(home)) > 0 || len(pastasClaudeData(home)) > 0 {
 		return true
 	}
 	local := pastaLocal(home)
@@ -297,7 +316,8 @@ func instalar() error {
 	fmt.Println("celular em Configurações → Aparelhos conectados.")
 	fmt.Println()
 	if claudeDetectado {
-		fmt.Println("Depois, feche o Claude Desktop e abra de novo.")
+		fmt.Println("Depois, saia do Claude Desktop pela bandeja (botão direito no ícone")
+		fmt.Println("perto do relógio → Sair) e abra de novo. Fechar no X não basta.")
 	}
 	if codexDetectado && avisoCodex == "" {
 		fmt.Println("No Codex, o lumnia-zap já entra na próxima sessão.")
@@ -508,8 +528,10 @@ func registrarNoClaude(home, destino, uv string) error {
 	for _, dir := range alvos {
 		if err := gravarConfig(dir, destino, uv); err != nil {
 			ultimoErro = err
+			fmt.Println("     (aviso: não consegui gravar em", dir+":", err, ")")
 			continue
 		}
+		fmt.Println("     lumnia-zap registrado em", filepath.Join(dir, "claude_desktop_config.json"))
 		gravou++
 	}
 	if gravou == 0 {
@@ -519,17 +541,18 @@ func registrarNoClaude(home, destino, uv string) error {
 }
 
 // pastasConfigClaude lista TODOS os lugares onde o Claude Desktop pode ler a
-// configuracao nesta maquina. Sao dois mundos:
+// configuracao nesta maquina. Sao tres mundos:
 //
 //   - instalador classico: %APPDATA%\Claude
 //   - Microsoft Store (MSIX): %LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude
+//   - Microsoft Store, versoes recentes: %LOCALAPPDATA%\Claude-Data\claude_<hash>
 //
 // A versao da Store ignora completamente o caminho classico — foi assim que a
 // primeira instalacao no PC do Douglas configurou o arquivo errado. Gravamos
 // em todos os que existirem: escrever a mais e inofensivo, escrever no lugar
 // errado faz o Claude nao enxergar o WhatsApp e ninguem descobrir por que.
 func pastasConfigClaude(home string) []string {
-	var dirs []string
+	dirs := pastasClaudeData(home)
 	for _, pkg := range pastasMSIX(home) {
 		dirs = append(dirs, filepath.Join(pkg, "LocalCache", "Roaming", "Claude"))
 	}

@@ -107,7 +107,7 @@
   @media (max-width:720px){.tiles{grid-template-columns:1fr}.meta{gap:16px}}
 </style>
 </head>
-<body>
+<body data-beatitude="1">
 <div class="wrap">
 
   <header>
@@ -262,8 +262,10 @@
     Se o Mac estiver desligado na hora marcada, o envio é registrado como perdido, nunca enviado atrasado.</div>
   </div>
 
-  <!-- BEATITUDE (modulo desligado por padrao; beatitude.go) -->
-  <div class="card" id="beatitude">
+  <!-- BEATITUDE (modulo desligado por padrao; beatitude.go). Escondido para quem
+       so quer o Zap no Claude: aparece em /beatitude, pelo link do rodape, ou
+       sozinho quando o modulo esta ligado ou no meio da configuracao. -->
+  <div class="card" id="beatitude" style="display:none">
     <h2>Beatitude · o mordomo pelo WhatsApp</h2>
     <div id="bt-wrap"><div class="empty">carregando…</div></div>
     <div id="bt-codigo-box" style="display:none;margin-top:10px">
@@ -284,7 +286,8 @@ launchctl kickstart -k gui/$(id -u)/dev.lumnia.zap</pre>
   </div>
 
   <footer>Painel local em localhost · inacessível fora desta máquina ·
-    <a href="https://lumnia.dev" target="_blank" rel="noopener">lumnia.dev</a></footer>
+    <a href="https://lumnia.dev" target="_blank" rel="noopener">lumnia.dev</a>
+    <span id="bt-link"> · <a href="/beatitude" onclick="return btAbrir()">Beatitude</a></span></footer>
 </div>
 
 <script>
@@ -609,6 +612,25 @@ async function doUnlink() {
 
 /* ---------- Beatitude ---------- */
 let btLigado = false, btPoll = false, btConsent = false, btGrupoSel = '';
+// O cartão só aparece se a pessoa pediu (/beatitude, #beatitude ou o link do
+// rodapé) ou se o módulo já está em uso. Quem baixou só para ter o WhatsApp no
+// Claude nunca o vê.
+const btPedidoNaURL = /^\/beatitude\/?$/.test(location.pathname) || location.hash === '#beatitude';
+let btPedido = btPedidoNaURL;
+// No Windows a ponte troca para data-beatitude="0" (panel.go): sem cartão,
+// sem link e sem consulta nenhuma ao módulo.
+const btDisponivel = document.body.dataset.beatitude !== '0';
+function btMostrar(sim) {
+  $('beatitude').style.display = sim ? '' : 'none';
+  $('bt-link').style.display = sim ? 'none' : '';
+}
+function btAbrir() {
+  btPedido = true;
+  try { history.replaceState(null, '', '/beatitude'); } catch (e) {}
+  btMostrar(true);
+  loadBeatitude().then(() => $('beatitude').scrollIntoView({ behavior: 'smooth' }));
+  return false;
+}
 const BT_HDR = { 'Content-Type': 'application/json', 'X-Lumnia-Painel': '1' };
 const btPost = (path, body) => api(path, { method: 'POST', headers: BT_HDR, body: JSON.stringify(body || {}) });
 
@@ -628,6 +650,8 @@ async function loadBeatitude() {
     const b = await api('/api/panel/beatitude');
     btLigado = !!b.ligado;
     btPoll = !!(b.instalando || b.login_ativo);
+    if (!btPedido && !(b.ligado || b.instalando || b.login_ativo)) { btMostrar(false); return; }
+    btMostrar(true);
     if (b.ligado) {
       // medição (15-10): onde o tempo de cada pedido foi parar
       const seg = ms => ms >= 1000 ? (ms/1000).toFixed(ms >= 10000 ? 0 : 1) + ' s' : (ms > 0 ? ms + ' ms' : '—');
@@ -729,6 +753,7 @@ async function loadBeatitude() {
           <span class="flash" id="bt-flash"></span></div>
       </div>`;
   } catch (e) {
+    if (btPedido) btMostrar(true);
     w.innerHTML = `<div class="empty">Não consegui ler o estado do módulo: ${esc(e.message)}</div>`;
   }
 }
@@ -825,9 +850,14 @@ function tickClock() {
   refreshStatus(); setInterval(refreshStatus, 5000);
   refreshStats();  setInterval(refreshStats, 30000);
   loadSchedules(); setInterval(loadSchedules, 60000);
-  loadBeatitude();
-  setInterval(() => { if (btPoll) loadBeatitude(); }, 2500);
-  setInterval(() => { if (!btPoll) loadBeatitude(); }, 15000);
+  if (btDisponivel) {
+    loadBeatitude().then(() => { if (btPedidoNaURL) $('beatitude').scrollIntoView(); });
+    setInterval(() => { if (btPoll) loadBeatitude(); }, 2500);
+    setInterval(() => { if (!btPoll) loadBeatitude(); }, 15000);
+  } else {
+    $('beatitude').remove();
+    $('bt-link').remove();
+  }
 })();
 </script>
 </body>

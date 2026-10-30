@@ -490,6 +490,15 @@ func runDueSchedules() {
 
 // ---------------------------------------------------------------- HTTP
 
+// panelHTMLParaPlataforma marca no <body> se o Beatitude existe aqui; o
+// script do painel lê data-beatitude e, com "0", nem monta o cartão.
+func panelHTMLParaPlataforma(comBeatitude bool) []byte {
+	if comBeatitude {
+		return panelHTML
+	}
+	return bytes.Replace(panelHTML, []byte(`<body data-beatitude="1">`), []byte(`<body data-beatitude="0">`), 1)
+}
+
 func registerPanelRoutes() {
 	h := func(fn func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -502,13 +511,17 @@ func registerPanelRoutes() {
 	}
 
 	http.HandleFunc("/", h(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+		// "/beatitude" serve o mesmo painel com o cartão do Beatitude à mostra;
+		// em "/" ele fica escondido até alguém ligar o módulo (panel.html).
+		// No Windows o módulo não existe: "/beatitude" é 404.
+		beatitudeURL := r.URL.Path == "/beatitude" || r.URL.Path == "/beatitude/"
+		if r.URL.Path != "/" && !(beatitudeURL && beatitudeDisponivel()) {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(panelHTML)
+		_, _ = w.Write(panelHTMLParaPlataforma(beatitudeDisponivel()))
 	}))
 
 	http.HandleFunc("/api/panel/status", h(panelStatusHandler))

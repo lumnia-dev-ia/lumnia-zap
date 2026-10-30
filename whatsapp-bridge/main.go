@@ -979,7 +979,9 @@ func main() {
 		case *events.Message:
 			// Process regular messages
 			handleMessage(client, messageStore, v, logger)
-			beatitudeOnMessage(v) // modulo Beatitude (beatitude.go); sai cedo se desligado
+			if beatitudeDisponivel() {
+				beatitudeOnMessage(v) // modulo Beatitude (beatitude.go); sai cedo se desligado
+			}
 			if !v.Info.IsFromMe {
 				panelNoteReceived()
 			}
@@ -1008,8 +1010,10 @@ func main() {
 	// Rotas e agendador do painel (panel.go) — registradas no mesmo mux
 	registerPanelRoutes()
 	startPanelScheduler()
-	initBeatitude()
-	registerBeatitudeRoutes()
+	if beatitudeDisponivel() { // Beatitude: só Mac e Linux (plataforma.go)
+		initBeatitude()
+		registerBeatitudeRoutes()
+	}
 	// Agenda da Apple (agenda_apple.go): inerte sem store/apple.json
 	initAgendaApple()
 	registerAgendaRoutes()

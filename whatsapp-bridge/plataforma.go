@@ -10,6 +10,14 @@ import (
 	"runtime"
 )
 
+// beatitudeDisponivel diz se o módulo Beatitude existe nesta plataforma. Ele
+// é só para Mac e Linux: no Windows a ponte não inicia o módulo, não registra
+// as rotas e o painel não mostra o cartão nem o link (decisão de 30/10/2026 —
+// quem instala no Windows quer só o WhatsApp no Claude).
+func beatitudeDisponivel() bool {
+	return runtime.GOOS != "windows"
+}
+
 // maquina é como as mensagens chamam o computador onde a ponte roda:
 // "Mac" no macOS, "computador" no Linux da nuvem ("neste computador").
 func maquina() string {

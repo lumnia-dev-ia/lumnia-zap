@@ -19,16 +19,38 @@ func TestPanelHTML_BeatitudeEscondidoEMarcado(t *testing.T) {
 	}
 }
 
-func TestPanelHTMLParaPlataforma(t *testing.T) {
-	com := panelHTMLParaPlataforma(true)
-	if !bytes.Contains(com, []byte(`data-beatitude="1"`)) {
-		t.Fatal("Mac/Linux: marca deveria ficar em 1")
+func TestPanelHTMLParaPlataforma_Mac(t *testing.T) {
+	if !bytes.Equal(panelHTMLParaPlataforma("darwin"), panelHTML) {
+		t.Fatal("no Mac o painel é o HTML embutido, sem trocas")
 	}
-	sem := panelHTMLParaPlataforma(false)
-	if !bytes.Contains(sem, []byte(`<body data-beatitude="0">`)) || bytes.Contains(sem, []byte(`data-beatitude="1"`)) {
-		t.Fatal("Windows: marca deveria virar 0")
+}
+
+func TestPanelHTMLParaPlataforma_Windows(t *testing.T) {
+	w := panelHTMLParaPlataforma("windows")
+	if !bytes.Contains(w, []byte(`<body data-beatitude="0">`)) || bytes.Contains(w, []byte(`data-beatitude="1"`)) {
+		t.Fatal("Windows: marca do Beatitude deveria virar 0")
 	}
-	if !bytes.Equal(panelHTML, com) {
-		t.Fatal("a versão com Beatitude não pode alterar o HTML embutido")
+	for _, mac := range []string{"launchctl", "Library/Application", "o Mac ligado", "Se o Mac estiver", "neste Mac\""} {
+		if bytes.Contains(w, []byte(mac)) {
+			t.Fatalf("Windows: sobrou texto de Mac: %q", mac)
+		}
+	}
+	for _, novo := range []string{"Menu Iniciar", "o computador ligado", "Se o computador estiver"} {
+		if !bytes.Contains(w, []byte(novo)) {
+			t.Fatalf("Windows: faltou o texto %q", novo)
+		}
+	}
+	if bytes.Equal(panelHTML, w) {
+		t.Fatal("a troca não pode alterar o HTML embutido")
+	}
+}
+
+func TestPanelHTMLParaPlataforma_Linux(t *testing.T) {
+	l := panelHTMLParaPlataforma("linux")
+	if !bytes.Contains(l, []byte(`data-beatitude="1"`)) {
+		t.Fatal("Linux: o Beatitude existe, a marca fica em 1")
+	}
+	if bytes.Contains(l, []byte("o Mac ligado")) {
+		t.Fatal("Linux: texto de Mac no agendamento")
 	}
 }

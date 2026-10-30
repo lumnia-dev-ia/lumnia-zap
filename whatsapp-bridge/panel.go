@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -490,13 +491,30 @@ func runDueSchedules() {
 
 // ---------------------------------------------------------------- HTTP
 
-// panelHTMLParaPlataforma marca no <body> se o Beatitude existe aqui; o
-// script do painel lê data-beatitude e, com "0", nem monta o cartão.
-func panelHTMLParaPlataforma(comBeatitude bool) []byte {
-	if comBeatitude {
+// panelHTMLParaPlataforma adapta o painel embutido ao sistema: marca no <body>
+// se o Beatitude existe aqui (o script le data-beatitude e, com "0", nem monta
+// o cartao) e troca os textos escritos para o Mac. O HTML embutido e o do Mac;
+// no Windows e no Linux a maquina vira "computador" (como maquina() nas
+// mensagens) e, no Windows, a ajuda do servico deixa de citar launchctl.
+func panelHTMLParaPlataforma(goos string) []byte {
+	if goos == "darwin" {
 		return panelHTML
 	}
-	return bytes.Replace(panelHTML, []byte(`<body data-beatitude="1">`), []byte(`<body data-beatitude="0">`), 1)
+	html := panelHTML
+	troca := func(de, para string) {
+		html = bytes.Replace(html, []byte(de), []byte(para), 1)
+	}
+	if goos == "windows" {
+		troca(`<body data-beatitude="1">`, `<body data-beatitude="0">`)
+		troca("Aí o problema é o serviço, não a sessão. No Terminal:</p>\n      <pre>launchctl list | grep lumnia\ntail -30 ~/Library/Application\\ Support/LumniaZap/logs/bridge.log\nlaunchctl kickstart -k gui/$(id -u)/dev.lumnia.zap</pre>",
+			"Aí o problema é o serviço, não a sessão. Reinicie o computador e, depois de entrar no Windows, "+
+				"abra o Lumnia Zap pelo Menu Iniciar. Se continuar assim, desinstale e instale de novo: "+
+				"a sessão do WhatsApp se perde e será preciso ler o QR code outra vez.</p>")
+	}
+	troca(`title="Versão da ponte instalada neste Mac"`, `title="Versão da ponte instalada neste computador"`)
+	troca("só dispara com o Mac ligado e acordado", "só dispara com o computador ligado e acordado")
+	troca("Se o Mac estiver desligado na hora marcada", "Se o computador estiver desligado na hora marcada")
+	return html
 }
 
 func registerPanelRoutes() {
@@ -521,7 +539,7 @@ func registerPanelRoutes() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(panelHTMLParaPlataforma(beatitudeDisponivel()))
+		_, _ = w.Write(panelHTMLParaPlataforma(runtime.GOOS))
 	}))
 
 	http.HandleFunc("/api/panel/status", h(panelStatusHandler))

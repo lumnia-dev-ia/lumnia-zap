@@ -1,17 +1,27 @@
 #!/bin/bash
-# build-msix.sh — fase 1 do teste MSIX do Lumnia Zap (fora da Store, sem custo).
+# build-msix.sh — pacote MSIX do Lumnia Zap para Windows, em dois modos.
 #
 # RODA EM LINUX, a partir da raiz do repositorio:
 #
-#   bash scripts/build-msix.sh 1.0.9.1
+#   bash scripts/build-msix.sh 1.0.9.3            # modo TESTE (padrao)
+#   bash scripts/build-msix.sh 1.1.0.0 --store    # modo STORE
 #
-# Gera em dist-msix/:
-#   Lumnia-Zap-<versao>.msix   pacote assinado com o certificado de TESTE
+# Modo teste — fora da Store, sem custo:
+#   Lumnia-Zap-<versao>.msix   assinado com o certificado de TESTE
 #   Lumnia-Zap-Teste.cer       certificado publico, para confiar no Windows
 #   lumnia-zap.mcpb            extensao do Claude Desktop (aponta para o alias)
+#   Suba o 4o numero a cada build, senao o Windows recusa "a mesma versao".
 #
-# A versao do MSIX tem 4 numeros; suba o ultimo a cada nova build de teste,
-# senao o Windows recusa instalar "a mesma versao" por cima.
+# Modo store — para enviar no Partner Center:
+#   Lumnia-Zap-<versao>-store.msix   SEM assinatura (a Microsoft assina)
+#   lumnia-zap.mcpb                  com o PFN da identidade da Store
+#   A identidade vem de msix/identidade-store.env (nao versionado), criado a
+#   partir de "Apps e jogos > Lumnia Zap > Identidade do produto":
+#     STORE_NAME="12345Lumnia.LumniaZap"
+#     STORE_PUBLISHER="CN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#     STORE_PUBLISHER_DISPLAY="Lumnia"
+#     STORE_PFN="12345Lumnia.LumniaZap_abcdefghijklm"
+#   A versao precisa terminar em .0.
 #
 # Pre-requisitos (Ubuntu 24.04):
 #   apt-get install gcc-mingw-w64-x86-64 osslsigncode zip unzip python3-pil
@@ -27,13 +37,18 @@
 set -euo pipefail
 
 VERSAO="${1:-}"
-[[ "$VERSAO" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "uso: bash scripts/build-msix.sh <a.b.c.d>"; exit 1; }
+MODO="${2:-}"
+[[ "$VERSAO" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "uso: bash scripts/build-msix.sh <a.b.c.d> [--store]"; exit 1; }
+case "$MODO" in ""|--store) ;; *) echo "uso: bash scripts/build-msix.sh <a.b.c.d> [--store]"; exit 1;; esac
+STORE=0; [ "$MODO" = "--store" ] && STORE=1
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$RAIZ/dist-msix"
 STAGE="$DIST/stage"
 CERT="$DIST/cert"
 PUBLISHER="CN=Lumnia Zap Teste"
+IDENT_NAME="Lumnia.LumniaZap"
+PUBLISHER_DISPLAY="Lumnia"
 PY_VERSAO="3.12.10"
 MAKEMSIX="${MAKEMSIX:-makemsix}"
 
@@ -46,6 +61,20 @@ precisa osslsigncode "osslsigncode não instalado"
 precisa go "go não instalado"
 precisa uv "uv não instalado"
 [ -x "$MAKEMSIX" ] || precisa "$MAKEMSIX" "makemsix não encontrado (defina MAKEMSIX=...)"
+
+if [ "$STORE" = 1 ]; then
+  ENVF="$RAIZ/msix/identidade-store.env"
+  [ -f "$ENVF" ] || falhar "modo --store exige $ENVF (ver cabeçalho deste script)"
+  # shellcheck disable=SC1090
+  . "$ENVF"
+  for v in STORE_NAME STORE_PUBLISHER STORE_PUBLISHER_DISPLAY STORE_PFN; do
+    [ -n "${!v:-}" ] || falhar "$v não definido em $ENVF"
+  done
+  [[ "$VERSAO" =~ \.0$ ]] || falhar "a Store exige versão terminada em .0 (recebi $VERSAO)"
+  [[ "$STORE_PFN" == "${STORE_NAME}_"* ]] || falhar "STORE_PFN não começa com STORE_NAME_"
+  PUBLISHER="$STORE_PUBLISHER"; IDENT_NAME="$STORE_NAME"; PUBLISHER_DISPLAY="$STORE_PUBLISHER_DISPLAY"
+  echo "     modo STORE: $IDENT_NAME / $PUBLISHER / $PUBLISHER_DISPLAY"
+fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/ponte" "$STAGE/mcp/servidor" "$STAGE/mcp/python" "$STAGE/mcp/site-packages" "$STAGE/assets" "$DIST/cache" "$CERT"
@@ -100,7 +129,9 @@ fi
 
 # ----------------------------------------------------- 3. manifesto e icones
 say "4/6  Manifesto e ícones"
-sed -e "s/@VERSAO@/$VERSAO/" -e "s/@PUBLISHER@/$PUBLISHER/" "$RAIZ/msix/AppxManifest.xml.in" > "$STAGE/AppxManifest.xml"
+sed -e "s/@VERSAO@/$VERSAO/" -e "s/@PUBLISHER@/$PUBLISHER/" -e "s/@NAME@/$IDENT_NAME/" \
+    -e "s/@PUBLISHER_DISPLAY@/$PUBLISHER_DISPLAY/" "$RAIZ/msix/AppxManifest.xml.in" > "$STAGE/AppxManifest.xml"
+grep -q '@' "$STAGE/AppxManifest.xml" && falhar "sobrou marcador @...@ no AppxManifest.xml"
 python3 - "$RAIZ/painel.ico" "$STAGE/assets" "$DIST/cache/icone.png" <<'PY'
 import sys
 from PIL import Image
@@ -118,41 +149,53 @@ printf '%s\n' "$(echo "$VERSAO" | cut -d. -f1-3)" > "$STAGE/VERSION"
 
 # ------------------------------------------------------------- 4. empacotar
 say "5/6  Empacotando e assinando"
-if [ ! -f "$CERT/teste.pfx" ]; then
-  openssl req -x509 -newkey rsa:3072 -sha256 -days 365 -nodes \
-    -keyout "$CERT/teste.key" -out "$CERT/teste.crt" -subj "/CN=Lumnia Zap Teste" \
-    -addext "basicConstraints=critical,CA:FALSE" \
-    -addext "keyUsage=critical,digitalSignature" \
-    -addext "extendedKeyUsage=codeSigning" 2>/dev/null
-  openssl pkcs12 -export -out "$CERT/teste.pfx" -inkey "$CERT/teste.key" -in "$CERT/teste.crt" -passout pass:teste
-fi
-openssl x509 -in "$CERT/teste.crt" -outform DER -out "$DIST/Lumnia-Zap-Teste.cer"
-
 SEM="$DIST/cache/sem-assinatura.msix"
-MSIX="$DIST/Lumnia-Zap-$VERSAO.msix"
-rm -f "$SEM" "$MSIX"
+rm -f "$SEM"
 "$MAKEMSIX" pack -d "$STAGE" -p "$SEM"
-# carimbo de tempo: sem ele, o pacote deixa de instalar quando o certificado
-# de teste vencer (365 dias). Se o TSA nao responder, assina sem carimbo.
-osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 \
-  -ts http://timestamp.digicert.com -in "$SEM" -out "$MSIX" \
-  || { echo "     (carimbo de tempo indisponível; assinando sem)"; rm -f "$MSIX";
-       osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 -in "$SEM" -out "$MSIX"; }
-osslsigncode verify -CAfile "$CERT/teste.crt" -in "$MSIX" | grep -q "Signature verification: ok" \
-  || falhar "a assinatura do MSIX não confere"
+
+if [ "$STORE" = 1 ]; then
+  # A Store rejeita pacote assinado por terceiros: vai sem assinatura.
+  MSIX="$DIST/Lumnia-Zap-$VERSAO-store.msix"
+  rm -f "$MSIX" && cp "$SEM" "$MSIX"
+  unzip -l "$MSIX" | grep -q AppxSignature.p7x && falhar "pacote da Store saiu assinado"
+  echo "     sem assinatura (a Microsoft assina na publicação)"
+else
+  if [ ! -f "$CERT/teste.pfx" ]; then
+    openssl req -x509 -newkey rsa:3072 -sha256 -days 365 -nodes \
+      -keyout "$CERT/teste.key" -out "$CERT/teste.crt" -subj "/CN=Lumnia Zap Teste" \
+      -addext "basicConstraints=critical,CA:FALSE" \
+      -addext "keyUsage=critical,digitalSignature" \
+      -addext "extendedKeyUsage=codeSigning" 2>/dev/null
+    openssl pkcs12 -export -out "$CERT/teste.pfx" -inkey "$CERT/teste.key" -in "$CERT/teste.crt" -passout pass:teste
+  fi
+  openssl x509 -in "$CERT/teste.crt" -outform DER -out "$DIST/Lumnia-Zap-Teste.cer"
+  MSIX="$DIST/Lumnia-Zap-$VERSAO.msix"
+  rm -f "$MSIX"
+  # carimbo de tempo: sem ele, o pacote deixa de instalar quando o certificado
+  # de teste vencer (365 dias). Se o TSA nao responder, assina sem carimbo.
+  osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 \
+    -ts http://timestamp.digicert.com -in "$SEM" -out "$MSIX" \
+    || { echo "     (carimbo de tempo indisponível; assinando sem)"; rm -f "$MSIX";
+         osslsigncode sign -pkcs12 "$CERT/teste.pfx" -pass teste -h sha256 -in "$SEM" -out "$MSIX"; }
+  osslsigncode verify -CAfile "$CERT/teste.crt" -in "$MSIX" | grep -q "Signature verification: ok" \
+    || falhar "a assinatura do MSIX não confere"
+fi
 
 # --------------------------------------------------------------- 5. .mcpb
 say "6/6  Extensão do Claude Desktop (.mcpb)"
-PFN="$(python3 - "$PUBLISHER" <<'PY'
+PFN="$(python3 - "$PUBLISHER" "$IDENT_NAME" <<'PY'
 import hashlib, sys
 # PublisherId = 13 caracteres base32 (alfabeto do Windows) dos 8 primeiros
 # bytes do SHA-256 do Publisher em UTF-16LE.
 h = hashlib.sha256(sys.argv[1].encode("utf-16-le")).digest()[:8]
 bits = "".join(f"{b:08b}" for b in h) + "0"
 alfa = "0123456789abcdefghjkmnpqrstvwxyz"
-print("Lumnia.LumniaZap_" + "".join(alfa[int(bits[i:i+5], 2)] for i in range(0, 65, 5)))
+print(sys.argv[2] + "_" + "".join(alfa[int(bits[i:i+5], 2)] for i in range(0, 65, 5)))
 PY
 )"
+if [ "$STORE" = 1 ] && [ "$PFN" != "$STORE_PFN" ]; then
+  falhar "PFN calculado ($PFN) difere do STORE_PFN do Partner Center ($STORE_PFN) — confira o Publisher"
+fi
 echo "     PackageFamilyName esperado: $PFN"
 M="$DIST/cache/mcpb"
 rm -rf "$M" && mkdir -p "$M/server"
@@ -196,5 +239,5 @@ rm -f "$DIST/lumnia-zap.mcpb"
 
 echo
 echo "======================================================================"
-ls -la "$MSIX" "$DIST/Lumnia-Zap-Teste.cer" "$DIST/lumnia-zap.mcpb" | awk '{print " " $5 "\t" $9}'
+ls -la "$MSIX" "$DIST/lumnia-zap.mcpb" $( [ "$STORE" = 1 ] || echo "$DIST/Lumnia-Zap-Teste.cer" ) | awk '{print " " $5 "\t" $9}'
 echo "======================================================================"

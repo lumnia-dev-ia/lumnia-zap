@@ -29,3 +29,4 @@ dist-windows/
 # copia .txt do diagnostico (so para enviar por WhatsApp, .cmd e bloqueado)
 scripts/diagnostico-lumnia-zap.cmd.txt
 dist-msix/
+msix/identidade-store.env

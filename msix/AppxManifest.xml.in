@@ -41,16 +41,11 @@
         <desktop:Extension Category="windows.startupTask" Executable="servico.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="LumniaZapPonte" Enabled="true" DisplayName="Lumnia Zap (ponte do WhatsApp)" />
         </desktop:Extension>
-      </Extensions>
-    </Application>
-
-    <!-- Servidor MCP: sem item no Menu Iniciar, exposto pelo alias de execucao
-         %LOCALAPPDATA%\Microsoft\WindowsApps\lumnia-zap-mcp.exe -->
-    <Application Id="LumniaZapMCP" Executable="mcp\lumnia-zap-mcp.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="Lumnia Zap MCP" Description="Servidor MCP do Lumnia Zap"
-        BackgroundColor="transparent" Square150x150Logo="assets\Square150x150Logo.png"
-        Square44x44Logo="assets\Square44x44Logo.png" AppListEntry="none" />
-      <Extensions>
+        <!-- Servidor MCP exposto pelo alias de execucao
+             %LOCALAPPDATA%\Microsoft\WindowsApps\lumnia-zap-mcp.exe.
+             Fica no MESMO Application: a Store recusa um segundo Application
+             escondido do Menu Iniciar (app "em segundo plano", exige isencao
+             HeadlessAppBypass). O Executable da extensao aponta o outro exe. -->
         <uap3:Extension Category="windows.appExecutionAlias" Executable="mcp\lumnia-zap-mcp.exe" EntryPoint="Windows.FullTrustApplication">
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="lumnia-zap-mcp.exe" />

@@ -158,7 +158,8 @@ func ponteRodada() {
 	ponteSincronizarFotos() // uma vez por dia; so quem esta em Pessoas e nao tem foto
 	ponteEnviarAgenda()     // agenda do iPhone para o brief (agenda_apple_ponte.go); sai cedo sem agenda
 	ponteMensagensDoGrupo()
-	ponteExecutar() // primeiro o que ja tem sim
+	ponteBuscarContatos() // telefone de quem o app pediu pelo nome (beatitude_contatos.go)
+	ponteExecutar()       // primeiro o que ja tem sim
 	pontePreparar()
 }
 

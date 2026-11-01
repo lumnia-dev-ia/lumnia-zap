@@ -405,12 +405,16 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 			}
 			beatitudeSend(beatitudeMarca + ": entendi assim: \"" + beatitudeCurto(t, 600) + "\"")
 			textos = append(textos, t)
-			falasLote = append(falasLote, falaNova(p.ID, p.Hora, t, "audio"))
+			if !falaEhRuido(t) {
+				falasLote = append(falasLote, falaNova(p.ID, p.Hora, t, "audio"))
+			}
 			continue
 		}
 		if p.Texto != "" {
 			textos = append(textos, p.Texto)
-			falasLote = append(falasLote, falaNova(p.ID, p.Hora, p.Texto, "texto"))
+			if !falaEhRuido(p.Texto) {
+				falasLote = append(falasLote, falaNova(p.ID, p.Hora, p.Texto, "texto"))
+			}
 		}
 	}
 	if len(textos) == 0 {

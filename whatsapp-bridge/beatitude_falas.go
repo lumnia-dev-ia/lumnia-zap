@@ -20,6 +20,7 @@ package main
 //     so espelha e nunca executa de novo.
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -180,13 +181,28 @@ func falaEhConversa(texto string) bool {
 	if t == "" || strings.HasPrefix(t, beatitudeMarca) || strings.HasPrefix(t, "◆") {
 		return false
 	}
-	if _, ok := ponteEhSimN(t); ok {
+	if falaEhRuido(t) {
 		return false
 	}
 	if beatitudeEhAprovacaoNavegador(t) || beatitudeEhComando(t) {
 		return false
 	}
 	return true
+}
+
+var falaSoNumeroRe = regexp.MustCompile(`^\s*\d{1,2}\s*[.!]?\s*$`)
+
+// falaEhRuido: "1", "sim 3", "ok", "pode" — respostas curtas a algo que o
+// grupo ofereceu. Nao sao conversa; o app ja registra o efeito delas.
+func falaEhRuido(texto string) bool {
+	t := strings.TrimSpace(texto)
+	if t == "" {
+		return true
+	}
+	if _, ok := ponteEhSimN(t); ok {
+		return true
+	}
+	return falaSoNumeroRe.MatchString(t) || beatitudeSimRe.MatchString(t)
 }
 
 // falasBackfill manda ao app, uma vez por instalacao, as falas dos ultimos

@@ -7,8 +7,8 @@ import (
 )
 
 func TestFalaEhConversa(t *testing.T) {
-	sim := []string{"Mandar um WhatsApp para a Lisiane dizendo te amo", "lembra que tenho dentista terça", "e o brief de hoje?"}
-	nao := []string{"", "sim 3", " SIM 12 ", beatitudeMarca + ": recebi.", "◆ Beatitude\n\nTexto"}
+	sim := []string{"Mandar um WhatsApp para a Lisiane dizendo te amo", "lembra que tenho dentista terça", "e o brief de hoje?", "123 pessoas vieram", "sim, pode marcar a reunião"}
+	nao := []string{"", "sim 3", " SIM 12 ", "1", "12.", "ok", "pode enviar", "Sim!", beatitudeMarca + ": recebi.", "◆ Beatitude\n\nTexto"}
 	for _, s := range sim {
 		if !falaEhConversa(s) {
 			t.Errorf("devia ser conversa: %q", s)

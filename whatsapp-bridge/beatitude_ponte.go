@@ -161,6 +161,8 @@ func ponteRodada() {
 	ponteBuscarContatos() // telefone de quem o app pediu pelo nome (beatitude_contatos.go)
 	ponteExecutar()       // primeiro o que ja tem sim
 	pontePreparar()
+	falasFlush()    // falas do grupo que ainda nao chegaram ao app (beatitude_falas.go)
+	falasBackfill() // uma vez por instalacao: os ultimos dias do grupo
 }
 
 func ponteErro(err error) {

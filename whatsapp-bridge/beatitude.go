@@ -139,6 +139,9 @@ type beatitudeConfig struct {
 	ModoRapido   bool      `json:"modo_rapido"`           // --strict-mcp-config: so Zap + Beatitude, sem os outros MCPs da conta (ver beatitudeMCPConfig)
 	ConsentidoEm time.Time `json:"consentido_em"`
 	UltimoPedido time.Time `json:"ultimo_pedido"` // timestamp do ultimo pedido ja processado
+	// Falas do grupo espelhadas no app (beatitude_falas.go): quando o backfill
+	// dos ultimos dias foi feito. Zero = ainda nao.
+	FalasBackfillEm time.Time `json:"falas_backfill_em,omitempty"`
 }
 
 type beatitudePedido struct {
@@ -383,6 +386,7 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	medida.EsperaMs = time.Since(primeiro).Milliseconds()
 
 	var textos []string
+	var falasLote []falaGrupo // o que vai ao app como "via WhatsApp" (beatitude_falas.go)
 	for _, p := range pedidos {
 		if p.Navegador > 0 {
 			beatitudeExecutarNavegador(p.Navegador)
@@ -395,30 +399,43 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 			medida.TranscricaoMs += time.Since(t0).Milliseconds()
 			if err != nil {
 				beatitudeSend(beatitudeMarca + ": " + beatitudeCurto(err.Error(), 200) + ". Se puder, escreva o pedido.")
+				f := falaNova(p.ID, p.Hora, "[áudio]", "audio")
+				falasResponder(f, "Não consegui ouvir o áudio: "+beatitudeCurto(err.Error(), 200), nil)
 				continue
 			}
 			beatitudeSend(beatitudeMarca + ": entendi assim: \"" + beatitudeCurto(t, 600) + "\"")
 			textos = append(textos, t)
+			falasLote = append(falasLote, falaNova(p.ID, p.Hora, t, "audio"))
 			continue
 		}
 		if p.Texto != "" {
 			textos = append(textos, p.Texto)
+			falasLote = append(falasLote, falaNova(p.ID, p.Hora, p.Texto, "texto"))
 		}
 	}
 	if len(textos) == 0 {
 		return
 	}
 	pedido := strings.Join(textos, "\n")
+	falasRegistrar(falasLote) // aparece no app antes mesmo da resposta
+	var ultimaFala falaGrupo
+	if len(falasLote) > 0 {
+		ultimaFala = falasLote[len(falasLote)-1]
+	}
 
 	if n := beatitudeRunsDesde(time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
-		beatitudeSend(fmt.Sprintf("%s: já fiz %d pedidos na última hora, que é o meu teto. Tente de novo daqui a pouco.", beatitudeMarca, n))
+		aviso := fmt.Sprintf("%s: já fiz %d pedidos na última hora, que é o meu teto. Tente de novo daqui a pouco.", beatitudeMarca, n)
+		beatitudeSend(aviso)
+		falasResponder(ultimaFala, strings.TrimPrefix(aviso, beatitudeMarca+": "), nil)
 		return
 	}
 
 	claude, err := beatitudeAcharClaude()
 	if err != nil {
-		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste " + maquina() + ". Abra o painel do Lumnia Zap para ver como instalar.")
+		aviso := "não encontrei o Claude Code neste " + maquina() + ". Abra o painel do Lumnia Zap para ver como instalar."
+		beatitudeSend(beatitudeMarca + ": " + aviso)
 		beatitudeRegistrar(time.Now(), pedido, "", "erro", err.Error())
+		falasResponder(ultimaFala, aviso, nil)
 		return
 	}
 
@@ -433,9 +450,11 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	medida.CustoUSD, medida.Modelo, medida.Sessao = m.CustoUSD, m.Modelo, m.Sessao
 	if err != nil {
 		panel.logger.Warnf("Beatitude: falha na execucao: %v", err)
-		beatitudeSend(beatitudeMarca + ": não consegui terminar desta vez (" + beatitudeCurto(err.Error(), 160) + "). Tente de novo em alguns minutos.")
+		aviso := "não consegui terminar desta vez (" + beatitudeCurto(err.Error(), 160) + "). Tente de novo em alguns minutos."
+		beatitudeSend(beatitudeMarca + ": " + aviso)
 		medida.TotalMs = time.Since(primeiro).Milliseconds()
 		beatitudeRegistrarMedido(inicio, pedido, "", "erro", err.Error(), &medida)
+		falasResponder(ultimaFala, aviso, nil)
 		return
 	}
 	t1 := time.Now()
@@ -453,6 +472,16 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	}
 	if propostaNav != "" {
 		beatitudeSend(beatitudeMarca + "\n\n" + propostaNav)
+	}
+	{ // o que a pessoa viu no grupo vai ao app, ligado a ultima fala do lote
+		var locais []falaAcaoLocal
+		if rascunhos != "" {
+			locais = append(locais, falaAcaoLocal{Tipo: "outro", Resumo: "Rascunho de mensagem no grupo, esperando o seu \"envia N\""})
+		}
+		if propostaNav != "" {
+			locais = append(locais, falaAcaoLocal{Tipo: "chrome", Resumo: "Tarefa no navegador proposta no grupo, esperando o seu \"abre\""})
+		}
+		falasResponder(ultimaFala, visivel, locais)
 	}
 	medida.EntregaMs = time.Since(t1).Milliseconds()
 	medida.TotalMs = time.Since(primeiro).Milliseconds()

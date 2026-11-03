@@ -119,25 +119,54 @@ func prontidaoServicoHabilitado() prontidaoItem {
 func prontidaoServicoCarregado() prontidaoItem {
 	uid := fmt.Sprint(os.Getuid())
 	out, err := exec.Command("/bin/launchctl", "print", "gui/"+uid+"/"+prontidaoServico).CombinedOutput()
-	estado := ""
-	for _, l := range strings.Split(string(out), "\n") {
-		if t := strings.TrimSpace(l); strings.HasPrefix(t, "state = ") {
-			estado = strings.TrimPrefix(t, "state = ")
-		}
-	}
-	ok := err == nil && estado == "running"
+	estado, pid := prontidaoEstadoLaunchd(string(out))
+	// "running" é o normal. Com pid no primeiro nível o processo está de pé,
+	// mesmo que o launchd descreva o estado com outra palavra.
+	ok := err == nil && (estado == "running" || pid > 0)
 	c := prontidaoItem{Chave: "servico_carregado", Nome: "Serviço carregado pelo sistema", OK: ok}
 	switch {
 	case err != nil:
 		c.Visto = "a ponte está rodando, mas não pelo launchd (foi iniciada à mão)"
 		c.Fazer = "Feche esta ponte e abra o Lumnia Zap (Aplicativos): ele sobe o serviço do jeito certo, que volta sozinho depois de reinício."
-	case ok:
+	case ok && estado == "running":
 		c.Visto = "launchd: running"
+	case ok:
+		c.Visto = fmt.Sprintf("launchd: %s, processo %d no ar", estado, pid)
 	default:
 		c.Visto = "launchd: " + estado
 		c.Fazer = "Abra o Lumnia Zap (Aplicativos) uma vez; ele recarrega o serviço."
 	}
 	return c
+}
+
+// prontidaoEstadoLaunchd lê o estado e o pid do serviço na saída de
+// `launchctl print`. Só contam as chaves do primeiro nível do bloco: os blocos
+// aninhados (endpoints, gatilhos de evento) também têm linhas "state = ..." e
+// a leitura antiga, que ficava com a última ocorrência, pegava uma delas e
+// marcava ✕ com a ponte rodando ("launchd: active", 28/10/2026).
+func prontidaoEstadoLaunchd(saida string) (estado string, pid int) {
+	nivel := ""
+	for _, l := range strings.Split(saida, "\n") {
+		t := strings.TrimLeft(l, " \t")
+		ind := l[:len(l)-len(t)]
+		t = strings.TrimSpace(t)
+		if t == "" || ind == "" {
+			continue
+		}
+		if nivel == "" {
+			nivel = ind // a primeira linha recuada marca o primeiro nível
+		}
+		if ind != nivel {
+			continue
+		}
+		switch {
+		case estado == "" && strings.HasPrefix(t, "state = "):
+			estado = strings.TrimPrefix(t, "state = ")
+		case pid == 0 && strings.HasPrefix(t, "pid = "):
+			pid, _ = strconv.Atoi(strings.TrimPrefix(t, "pid = "))
+		}
+	}
+	return estado, pid
 }
 
 func prontidaoSemEncerramentoAutomatico() prontidaoItem {

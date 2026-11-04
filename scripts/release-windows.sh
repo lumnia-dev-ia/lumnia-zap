@@ -35,6 +35,10 @@ DIST="$RAIZ/dist-windows"
 STATE="$DIST/.state"
 PACOTE="lumnia-zap-windows-amd64.zip"
 INSTALADOR="Instalador-Lumnia-Zap-Windows.exe"
+EXTENSAO="lumnia-zap.mcpb"
+# PackageFamilyName do Lumnia Zap na Microsoft Store (Partner Center ->
+# Identidade do produto). E publico: aparece em qualquer instalacao da Store.
+PFN_STORE="Lumnia.LumniaZap_27md6avg2vwam"
 
 say()    { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 pulou()  { printf '     \033[2m(já feito, pulando)\033[0m\n'; }
@@ -53,7 +57,7 @@ gh auth status >/dev/null 2>&1 || falhar "gh não autenticado"
 mkdir -p "$DIST" "$STATE"
 
 # ---------------------------------------------------------------- 1. a ponte
-say "1/4  Compilando a ponte (cgo + mingw-w64, mesmo driver sqlite do Mac)"
+say "1/5  Compilando a ponte (cgo + mingw-w64, mesmo driver sqlite do Mac)"
 if feito bridge.built; then pulou; else
   precisa x86_64-w64-mingw32-gcc "mingw-w64 não instalado — compile num Linux/WSL (sudo apt-get install gcc-mingw-w64-x86-64)"
   cd "$RAIZ/whatsapp-bridge"
@@ -64,7 +68,7 @@ if feito bridge.built; then pulou; else
 fi
 
 # ------------------------------------------------------------ 2. o instalador
-say "2/4  Compilando o instalador"
+say "2/5  Compilando o instalador"
 if feito installer.built; then pulou; else
   cd "$RAIZ/installer-windows"
   CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
@@ -74,7 +78,7 @@ if feito installer.built; then pulou; else
 fi
 
 # ----------------------------------------------------------------- 3. pacote
-say "3/4  Empacotando"
+say "3/5  Empacotando"
 if feito pacote.built; then pulou; else
   precisa zip "zip não instalado (sudo apt-get install zip)"
   STAGE="$(mktemp -d)/lumnia-zap"
@@ -84,9 +88,8 @@ if feito pacote.built; then pulou; else
     cp "$RAIZ/whatsapp-mcp-server/$f" "$STAGE/whatsapp-mcp-server/$f"
   done
   printf '# lumnia-zap mcp server\n' > "$STAGE/whatsapp-mcp-server/README.md"
-  # painel.ico eh gerado a partir do painel.icns (nao versionado — gere uma vez com
-  # Pillow: Image.open("painel.icns").convert("RGBA").save("painel.ico", sizes=[...]))
-  [ -f "$RAIZ/painel.ico" ] || falhar "painel.ico não encontrado na raiz do repo — gere a partir do painel.icns"
+  # painel.ico esta versionado na raiz do repo (gerado uma vez do painel.icns)
+  [ -f "$RAIZ/painel.ico" ] || falhar "painel.ico não encontrado na raiz do repo"
   cp "$RAIZ/painel.ico" "$STAGE/painel.ico"
   cp "$RAIZ/LICENSE" "$STAGE/LICENSE"
   printf '%s\n' "$VERSAO" > "$STAGE/VERSION"
@@ -96,17 +99,27 @@ if feito pacote.built; then pulou; else
   marcar pacote.built
 fi
 
-# --------------------------------------------------------------- 4. publicar
-say "4/4  Publicando na release v$VERSAO"
+# ------------------------------------------------- 4. extensao do Claude (.mcpb)
+# Para quem instalou pela Microsoft Store: lumnia.dev/zap manda baixar
+# releases/latest/download/lumnia-zap.mcpb. Vai em TODA release, senao o link
+# do site (e o roteiro do revisor da Store) da 404 quando sai versao nova.
+say "4/5  Extensão do Claude para a versão da Microsoft Store"
+if feito mcpb.built; then pulou; else
+  bash "$RAIZ/scripts/mcpb.sh" "$VERSAO" "$PFN_STORE" "$DIST/$EXTENSAO"
+  marcar mcpb.built
+fi
+
+# --------------------------------------------------------------- 5. publicar
+say "5/5  Publicando na release v$VERSAO"
 cd "$RAIZ"
 if gh release view "v$VERSAO" --repo "$REPO" >/dev/null 2>&1; then
   echo "     release v$VERSAO já existe — adicionando/substituindo os arquivos Windows"
-  gh release upload "v$VERSAO" --repo "$REPO" --clobber "$DIST/$INSTALADOR" "$DIST/$PACOTE"
+  gh release upload "v$VERSAO" --repo "$REPO" --clobber "$DIST/$INSTALADOR" "$DIST/$PACOTE" "$DIST/$EXTENSAO"
 else
   gh release create "v$VERSAO" --repo "$REPO" \
     --title "Lumnia Zap v$VERSAO" \
     --notes "Windows: baixe **$INSTALADOR** e dê duplo clique (o Windows vai avisar que o app não é reconhecido — clique em 'Mais informações' → 'Executar assim mesmo'; o instalador ainda não é assinado digitalmente)." \
-    "$DIST/$INSTALADOR" "$DIST/$PACOTE"
+    "$DIST/$INSTALADOR" "$DIST/$PACOTE" "$DIST/$EXTENSAO"
 fi
 
 echo

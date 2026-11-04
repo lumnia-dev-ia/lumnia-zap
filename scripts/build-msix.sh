@@ -132,16 +132,15 @@ say "4/6  Manifesto e ícones"
 sed -e "s/@VERSAO@/$VERSAO/" -e "s/@PUBLISHER@/$PUBLISHER/" -e "s/@NAME@/$IDENT_NAME/" \
     -e "s/@PUBLISHER_DISPLAY@/$PUBLISHER_DISPLAY/" "$RAIZ/msix/AppxManifest.xml.in" > "$STAGE/AppxManifest.xml"
 grep -q '@' "$STAGE/AppxManifest.xml" && falhar "sobrou marcador @...@ no AppxManifest.xml"
-python3 - "$RAIZ/painel.ico" "$STAGE/assets" "$DIST/cache/icone.png" <<'PY'
+python3 - "$RAIZ/painel.ico" "$STAGE/assets" <<'PY'
 import sys
 from PIL import Image
-ico, out, mcpb_icon = sys.argv[1:]
+ico, out = sys.argv[1:]
 im = Image.open(ico)
 im.size = max(im.info.get("sizes", [im.size]))
 im = im.convert("RGBA")
 for nome, lado in [("Square150x150Logo", 150), ("Square44x44Logo", 44), ("StoreLogo", 50)]:
     im.resize((lado, lado), Image.LANCZOS).save(f"{out}/{nome}.png")
-im.resize((256, 256), Image.LANCZOS).save(mcpb_icon)
 PY
 cp "$RAIZ/LICENSE" "$STAGE/LICENSE.txt"
 # panel.go le VERSION em <pasta-do-exe>\..\VERSION = raiz do pacote
@@ -197,45 +196,7 @@ if [ "$STORE" = 1 ] && [ "$PFN" != "$STORE_PFN" ]; then
   falhar "PFN calculado ($PFN) difere do STORE_PFN do Partner Center ($STORE_PFN) — confira o Publisher"
 fi
 echo "     PackageFamilyName esperado: $PFN"
-M="$DIST/cache/mcpb"
-rm -rf "$M" && mkdir -p "$M/server"
-cp "$DIST/cache/icone.png" "$M/icon.png"
-cat > "$M/server/LEIA-ME.txt" <<EOF
-Esta extensão não traz o servidor dentro dela. Ela chama o Lumnia Zap
-instalado pelo pacote MSIX, pelo alias de execução:
-  %LOCALAPPDATA%\Microsoft\WindowsApps\lumnia-zap-mcp.exe
-Instale o MSIX antes (pacote $PFN).
-EOF
-VSEM="$(echo "$VERSAO" | cut -d. -f1-3)"
-cat > "$M/manifest.json" <<EOF
-{
-  "manifest_version": "0.3",
-  "name": "lumnia-zap",
-  "display_name": "Lumnia Zap",
-  "version": "$VSEM",
-  "description": "Seu WhatsApp no Claude, pela ponte local do Lumnia Zap (requer o pacote MSIX instalado).",
-  "author": { "name": "Lumnia", "url": "https://lumnia.dev/zap" },
-  "homepage": "https://lumnia.dev/zap",
-  "repository": { "type": "git", "url": "https://github.com/lumnia-dev-ia/lumnia-zap" },
-  "license": "MIT",
-  "icon": "icon.png",
-  "server": {
-    "type": "binary",
-    "entry_point": "server/LEIA-ME.txt",
-    "mcp_config": {
-      "command": "\${HOME}\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\lumnia-zap-mcp.exe",
-      "args": []
-    }
-  },
-  "compatibility": { "platforms": ["win32"] },
-  "_meta": {
-    "com.microsoft.windows": { "package_family_name": "$PFN" }
-  }
-}
-EOF
-python3 -m json.tool "$M/manifest.json" >/dev/null || falhar "manifest.json inválido"
-rm -f "$DIST/lumnia-zap.mcpb"
-(cd "$M" && zip -q -r -X "$DIST/lumnia-zap.mcpb" manifest.json icon.png server)
+bash "$RAIZ/scripts/mcpb.sh" "$(echo "$VERSAO" | cut -d. -f1-3)" "$PFN" "$DIST/lumnia-zap.mcpb"
 
 echo
 echo "======================================================================"

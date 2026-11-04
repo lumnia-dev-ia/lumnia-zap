@@ -112,15 +112,42 @@ fi
 # --------------------------------------------------------------- 5. publicar
 say "5/5  Publicando na release v$VERSAO"
 cd "$RAIZ"
+ARQUIVOS=("$INSTALADOR" "$PACOTE" "$EXTENSAO")
+# nomes dos arquivos que a release tem agora
+na_release() { gh release view "v$VERSAO" --repo "$REPO" --json assets --jq '.assets[].name'; }
 if gh release view "v$VERSAO" --repo "$REPO" >/dev/null 2>&1; then
-  echo "     release v$VERSAO já existe — adicionando/substituindo os arquivos Windows"
-  gh release upload "v$VERSAO" --repo "$REPO" --clobber "$DIST/$INSTALADOR" "$DIST/$PACOTE" "$DIST/$EXTENSAO"
+  echo "     release v$VERSAO já existe — substituindo os arquivos Windows"
+  # Apagar e enviar um por vez. Com --clobber e varios arquivos juntos, o gh
+  # apagou o instalador antigo e nao enviou o novo, sem erro (04/11/2026): a
+  # release ficou sem Instalador-Lumnia-Zap-Windows.exe e o link deu 404.
+  for f in "${ARQUIVOS[@]}"; do
+    if na_release | grep -qx "$f"; then
+      gh release delete-asset "v$VERSAO" "$f" --repo "$REPO" --yes
+    fi
+    gh release upload "v$VERSAO" --repo "$REPO" "$DIST/$f"
+  done
 else
   gh release create "v$VERSAO" --repo "$REPO" \
     --title "Lumnia Zap v$VERSAO" \
     --notes "Windows: baixe **$INSTALADOR** e dê duplo clique (o Windows vai avisar que o app não é reconhecido — clique em 'Mais informações' → 'Executar assim mesmo'; o instalador ainda não é assinado digitalmente)." \
     "$DIST/$INSTALADOR" "$DIST/$PACOTE" "$DIST/$EXTENSAO"
 fi
+
+# Conferir de verdade: os tres arquivos precisam estar na release. Falta um,
+# tenta de novo; se continuar faltando, o job falha (nunca "sucesso" com o
+# link de instalacao quebrado).
+for tentativa in 1 2 3; do
+  faltam=()
+  for f in "${ARQUIVOS[@]}"; do na_release | grep -qx "$f" || faltam+=("$f"); done
+  [ ${#faltam[@]} -eq 0 ] && break
+  echo "     faltando na release (tentativa $tentativa): ${faltam[*]}"
+  sleep 5
+  for f in "${faltam[@]}"; do gh release upload "v$VERSAO" --repo "$REPO" "$DIST/$f" || true; done
+done
+for f in "${ARQUIVOS[@]}"; do
+  na_release | grep -qx "$f" || falhar "$f não está na release v$VERSAO depois de 3 tentativas"
+done
+echo "     conferido: ${ARQUIVOS[*]} na release v$VERSAO"
 
 echo
 echo "======================================================================"

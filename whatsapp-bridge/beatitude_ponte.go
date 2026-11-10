@@ -564,7 +564,7 @@ func ponteTentarPreparar(claude string, a ponteAcaoPreparar) bool {
 	if chat == "" {
 		return false
 	}
-	if n := beatitudeRunsDesde(time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
+	if n := beatitudeRunsPrefixo("preparar:", time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
 		ponteEsquecer(a.ID)
 		return false
 	}

@@ -30,3 +30,6 @@ dist-windows/
 scripts/diagnostico-lumnia-zap.cmd.txt
 dist-msix/
 msix/identidade-store.env
+
+# binario do "go build" na pasta da ponte (nome do modulo)
+whatsapp-bridge/whatsapp-client

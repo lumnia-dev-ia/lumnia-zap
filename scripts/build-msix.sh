@@ -4,7 +4,7 @@
 # RODA EM LINUX, a partir da raiz do repositorio:
 #
 #   bash scripts/build-msix.sh 1.0.9.3            # modo TESTE (padrao)
-#   bash scripts/build-msix.sh 1.1.0.0 --store    # modo STORE
+#   bash scripts/build-msix.sh 1.1.1.0 --store    # modo STORE
 #
 # Modo teste — fora da Store, sem custo:
 #   Lumnia-Zap-<versao>.msix   assinado com o certificado de TESTE

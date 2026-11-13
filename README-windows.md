@@ -1,98 +1,94 @@
-# Lumnia Zap — Windows (novo)
+# Lumnia Zap — Windows
 
-Porta do instalador de macOS para Windows 10/11 (64-bit). Feita numa sessão
-sem acesso a um PC Windows real — compilada e testada (`go build`, `go vet`)
-neste ambiente, mas **ainda não rodada num Windows de verdade**. Trate a
-primeira instalação como um teste, não como algo já validado.
+Desde novembro de 2026 o caminho principal no Windows é a **Microsoft Store**.
+O instalador manual (`.exe`) continua existindo para PCs que bloqueiam a Store.
+As duas formas usam a mesma ponte, o mesmo painel e o mesmo servidor MCP; o que
+muda é como chegam ao PC e como o Claude encontra o servidor.
 
-## O que é igual ao Mac
+## Microsoft Store (recomendado)
 
-- `whatsapp-bridge`: **nenhuma linha de código mudou**. É o mesmo `main.go`/
-  `panel.go`, compilado para Windows com `GOOS=windows` usando um
-  cross-compilador mingw-w64 (`CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc`), sem
-  trocar o driver sqlite (continua `mattn/go-sqlite3`, o mesmo do Mac). O
-  `.exe` resultante só depende de `KERNEL32.dll` e `msvcrt.dll` — nada extra
-  pra instalar.
-- `whatsapp-mcp-server` (Python): usado sem nenhuma alteração. `uv` resolve o
-  Python sozinho em qualquer SO.
-- O painel (`http://localhost:8080`), a API, os quatro fixes do upstream —
-  tudo igual, porque está no binário compartilhado.
+Página: <https://apps.microsoft.com/detail/9NNDPSDP0G34> (Store ID
+`9NNDPSDP0G34`, publicador Lumnia). Quem assina o pacote é a Microsoft: não há
+aviso do SmartScreen e não precisa de administrador.
 
-## O que foi refeito para Windows (`installer-windows/`)
+1. Instale pela Store e abra o **Lumnia Zap** pelo Menu Iniciar. Abrir uma vez
+   é o que liga a inicialização automática nos próximos logins.
+2. Escaneie o QR code com o WhatsApp do celular (Configurações → Aparelhos
+   conectados).
+3. Instale no Claude a extensão
+   [lumnia-zap.mcpb](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/lumnia-zap.mcpb):
+   abra o arquivo com o Claude Desktop (ou arraste para a janela dele) e
+   confirme.
+4. Saia do Claude pela bandeja (botão direito no ícone perto do relógio →
+   **Sair**; o X só esconde a janela) e abra de novo.
+5. No painel, use **Testar com o Claude**.
 
-O instalador de Mac (`installer/main.go`) usa launchd, `.app` bundle e
-`osascript` — tudo específico de macOS. O `installer-windows/main.go` é um
-programa novo, em Go também, que faz o equivalente com mecanismos do
-Windows:
+Onde ficam os dados: `%LOCALAPPDATA%\Packages\Lumnia.LumniaZap_27md6avg2vwam\LocalState\`
+(`whatsapp-bridge\store\` e `logs\`). **Desinstalar o app da Store apaga essa
+pasta, inclusive a sessão do WhatsApp.** Atualizar pela Store preserva.
 
-| Mac | Windows |
-|---|---|
-| `~/Library/Application Support/LumniaZap` | `%LOCALAPPDATA%\LumniaZap` |
-| `~/Library/Application Support/Claude/claude_desktop_config.json` | `%APPDATA%\Claude\claude_desktop_config.json` (mesmo formato/local documentado pela Anthropic) |
-| `~/.codex/config.toml` (OpenAI Codex, se detectado) | `%USERPROFILE%\.codex\config.toml` (mesmo formato TOML documentado pela OpenAI; `CODEX_HOME` é respeitado nos dois) |
-| LaunchAgent (`launchctl`) com `KeepAlive` | atalho `.lnk` na pasta **Startup** do usuário + um `watchdog.vbs` que reinicia a ponte se ela cair (checa `/api/panel/status` a cada 15s) |
-| diálogos via `osascript` | prompts no console (é um app de console — a janela preta que abre ao dar duplo clique) + uma caixa de mensagem final via PowerShell (best-effort) |
-| atalho `.app` na Mesa | atalho `.lnk` na Área de Trabalho (criado via COM do PowerShell, `WScript.Shell`) |
-| `.icns` | `painel.ico` (convertido do `.icns` com Pillow) |
-| assinado + notarizado pela Apple | **não assinado** — veja abaixo |
+Como o Claude acha o servidor: o pacote expõe o alias
+`%LOCALAPPDATA%\Microsoft\WindowsApps\lumnia-zap-mcp.exe`, que roda o servidor
+MCP com um Python embutido (sem `uv`, sem baixar nada). A extensão `.mcpb`
+aponta para esse alias.
 
-Não precisa de admin em nenhuma etapa (tudo roda no perfil do próprio
-usuário, igual ao Mac).
+### Se o PC já tinha a instalação manual
 
-## Importante: sem assinatura de código
+Ao abrir o Lumnia Zap da Store, ele pergunta se quer passar o histórico e a
+conexão do WhatsApp para a versão da Store. Respondendo **Sim**:
 
-O instalador de Mac é assinado e notarizado pela Apple, então abre sem
-aviso. O instalador de Windows **não tem certificado de assinatura**
-(Authenticode) — isso custa dinheiro (por volta de US$100–400/ano, emissores
-como DigiCert, Sectigo, SignPath) e não dá pra resolver de graça. Sem isso,
-o Windows SmartScreen vai mostrar "O Windows protegeu seu PC" na primeira
-execução. Quem for instalar precisa clicar em **Mais informações** → **Executar
-assim mesmo**. Vale avisar isso de antemão pra família não desistir achando
-que é vírus.
+- a Tarefa Agendada "Lumnia Zap" e o atalho de inicialização da versão antiga
+  saem; os processos dela são encerrados;
+- o Claude é fechado (abra de novo no fim);
+- o histórico (`store\`) é copiado para a pasta da Store; o que a Store já
+  tinha vira `store.bak-<data>`;
+- a configuração do Claude que apontava para a versão antiga passa a apontar
+  para o alias da Store;
+- a pasta antiga (`%LOCALAPPDATA%\LumniaZap`) fica guardada, intacta.
 
-## Como testar (num PC Windows de verdade)
+Se o painel pedir o QR code depois, escaneie de novo: o histórico fica.
+Enquanto a passagem não for feita, a versão da Store não sobe (as duas
+disputam a porta 8080) e o painel que abre é o antigo, que avisa disso.
 
-1. Publique uma release com `bash scripts/release-windows.sh <versão>`
-   (roda em Linux/WSL — não precisa de Windows pra compilar, só pra testar).
-   Pré-requisitos: `sudo apt-get install gcc-mingw-w64-x86-64 zip`, `go`, `gh`
-   autenticado. Isso sobe `Instalador-Lumnia-Zap-Windows.exe` e
-   `lumnia-zap-windows-amd64.zip` pra mesma release do GitHub que já existe
-   (`lumnia-dev-ia/lumnia-zap`).
-2. No Windows: baixe o `.exe`, clique "Mais informações" → "Executar assim
-   mesmo" no aviso do SmartScreen, e dê duplo clique.
-3. Confirme no console (S/n), espere baixar/instalar, escaneie o QR code que
-   abre no navegador.
-4. Feche e abra o Claude Desktop de novo — o servidor `lumnia-zap` deve
-   aparecer no indicador de MCP. Se o PC tiver o OpenAI Codex, confira também
-   `codex mcp list` (ou abra `%USERPROFILE%\.codex\config.toml`): a seção
-   `[mcp_servers.lumnia-zap]` deve estar lá, com o resto do arquivo intacto.
-5. Reinicie o PC e confirme que a ponte volta sozinha (o atalho da pasta
-   Startup deve disparar o `watchdog.vbs`).
+## Instalador manual (`.exe`)
 
-## Pontos que merecem atenção ao testar (não pude verificar sem Windows)
+Para PC que bloqueia a Store. Baixe o
+[Instalador-Lumnia-Zap-Windows.exe](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/Instalador-Lumnia-Zap-Windows.exe).
+Não tem assinatura Authenticode, então o SmartScreen avisa na primeira
+execução: *Mais informações* → *Executar assim mesmo*.
 
-- **Local exato do Claude Desktop**: a checagem no instalador é só
-  informativa (não bloqueia) porque a instalação do Claude no Windows varia
-  — Squirrel clássico ou pacote MSIX têm pastas diferentes. Se o aviso "não
-  encontramos o Claude" aparecer com o Claude já instalado, não é bug — é só
-  a checagem sendo conservadora.
-- **`.lnk` via PowerShell/COM**: é o mecanismo padrão do Windows pra criar
-  atalhos, mas depende do PowerShell estar disponível no PATH (é built-in em
-  todo Windows 10/11, mas confirme).
-- **`watchdog.vbs` via `wscript.exe //B`**: `//B` roda em modo "batch" (sem
-  diálogos/prompts do próprio VBScript), o que deveria manter tudo invisível
-  em segundo plano. Vale confirmar que nenhuma janela fica piscando.
-- **Antivírus/Defender**: um `.exe` novo, não assinado, baixando outro `.exe`
-  da internet e mexendo em `claude_desktop_config.json` é exatamente o tipo
-  de comportamento que heurísticas de antivírus desconfiam. Pode ser que o
-  Defender ou outro AV barre ou coloque em quarentena — se acontecer, vai
-  precisar de uma exceção manual até (e se) o app ganhar reputação/assinatura.
+- Recusa instalar quando a versão da Store já está no PC (`--forcar` só para
+  suporte).
+- Se o Claude estiver aberto, pede para fechar antes de gravar a configuração.
+- Grava o `lumnia-zap` em todos os lugares onde o Claude pode ler a
+  configuração: `%APPDATA%\Claude`,
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude` e
+  `%LOCALAPPDATA%\Claude-Data\claude_*` (Claude da Microsoft Store em versões
+  recentes). Gravação atômica, UTF-8 sem BOM, backup do original na primeira vez.
+- No fim, confere se a entrada continua lá e mostra o nome do computador.
+- Dados em `%LOCALAPPDATA%\LumniaZap`; inicia com o Windows por uma Tarefa
+  Agendada (ou, se a política do PC bloquear, um atalho na pasta Inicializar);
+  log em `%LOCALAPPDATA%\LumniaZap\logs\bridge.log`.
 
-## Depois de validar num Windows real
+## Beatitude
 
-Se quiser deixar isso redondo (tipo o que já existe pro Mac), os próximos
-passos naturais seriam: comprar um certificado de assinatura de código pra
-sumir com o aviso do SmartScreen, e trocar o app de console por uma janela
-gráfica de verdade (hoje mostra uma janela preta com texto — dá pra fazer,
-mas exige uma lib de GUI, tipo `fyne` ou `webview`, e mais tempo de
-desenvolvimento).
+O módulo Beatitude é só macOS e Linux. No Windows a ponte não o inicia e o
+painel não o mostra.
+
+## Diagnóstico
+
+- Painel: `http://localhost:8080` (só responde no próprio PC). O cartão
+  **Ligação com o Claude** diz se o Claude leu e de qual banco.
+- Logs do Claude: `%LOCALAPPDATA%\Claude\logs\` (`mcp.log`,
+  `mcp-server-lumnia-zap.log`).
+- Instalação manual: `scripts/diagnostico-lumnia-zap.cmd` gera um relatório
+  na Área de Trabalho, sem conteúdo de conversas.
+
+## Para quem publica
+
+- `.exe` e `.zip` da instalação manual: workflow **Build & publish Windows
+  release** (`release-windows.sh`), na mesma tag do Mac.
+- `.msix` da Store: workflow **Build MSIX (Microsoft Store)** (`build-msix.sh
+  <a.b.c.0> --store`), que entrega o pacote sem assinatura como artefato. O
+  envio é manual no Partner Center (upload acima de 10 MB).
+- `lumnia-zap.mcpb`: anexado a toda release pelo `release-windows.sh`.

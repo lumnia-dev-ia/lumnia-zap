@@ -32,13 +32,15 @@ into something a non-developer can actually run and keep running.
 A local web panel (served by the bridge itself, no extra process) with
 connection status, one-click reconnect, an in-browser QR code for re-pairing,
 daily counters, and scheduled messages — once, daily, weekly, or yearly, the
-last one being what birthday greetings need. A background service so the bridge
-survives reboots and restarts itself if it dies: a launchd agent on macOS, a
-Startup shortcut plus a watchdog script on Windows. Automatic registration of
+last one being what birthday greetings need. Since 1.1.1 the panel also shows
+whether Claude is actually reading *this* installation's database, can repair
+Claude's configuration, and runs an end-to-end "test with Claude". A background
+service so the bridge survives reboots and restarts itself if it dies: a
+launchd agent on macOS, a startup task on Windows. Automatic registration of
 the `lumnia-zap` MCP server in Claude Desktop and in OpenAI Codex — both point
-at the same server and the same local database. An installer, an app icon,
-and a two-click setup aimed at family members — signed and notarized by Apple on
-macOS, unsigned and still in beta on Windows.
+at the same server and the same local database. Installers aimed at family
+members: signed and notarized by Apple on macOS, distributed through the
+Microsoft Store on Windows.
 
 It also carries four upstream bug fixes, described below, without which the
 original project does not currently run.
@@ -54,20 +56,49 @@ original project does not currently run.
 descompacte e dê duplo clique. O instalador é assinado e notarizado pela Apple,
 então não aparece aviso de segurança. Ele não pede senha de administrador.
 
-**Windows 10/11 64-bit — beta.** Baixe o
-[Instalador-Lumnia-Zap-Windows.exe](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/Instalador-Lumnia-Zap-Windows.exe)
-e dê duplo clique. Ainda não há assinatura Authenticode, então o SmartScreen vai
-mostrar "O Windows protegeu seu PC" na primeira execução — clique em *Mais
-informações* → *Executar assim mesmo*. Detalhes em
-[README-windows.md](README-windows.md).
+**Windows 10/11 64-bit.** Instale pela
+[Microsoft Store](https://apps.microsoft.com/detail/9NNDPSDP0G34) (a Microsoft
+assina o pacote; não há aviso do SmartScreen). Depois:
 
-Nos dois casos é preciso ter pelo menos um cliente MCP instalado — o
+1. abra o **Lumnia Zap** pelo Menu Iniciar e escaneie o QR code;
+2. instale no Claude a extensão
+   [lumnia-zap.mcpb](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/lumnia-zap.mcpb)
+   (abra o arquivo com o Claude Desktop e confirme);
+3. saia do Claude pela bandeja (botão direito no ícone perto do relógio →
+   **Sair**; o X só esconde) e abra de novo.
+
+Se este PC já tinha a instalação antiga (o `.exe`), o Lumnia Zap da Store
+oferece, ao ser aberto, passar o histórico e a conexão para a versão nova. Em
+PC que bloqueia a Store ainda existe o instalador manual
+[Instalador-Lumnia-Zap-Windows.exe](https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/Instalador-Lumnia-Zap-Windows.exe)
+(sem assinatura: o SmartScreen avisa; *Mais informações* → *Executar assim
+mesmo*). Não instale os dois: o manual recusa quando acha a versão da Store.
+Detalhes em [README-windows.md](README-windows.md).
+
+É preciso ter pelo menos um cliente MCP instalado — o
 [Claude Desktop](https://claude.ai/download) e/ou o
-[OpenAI Codex](https://developers.openai.com/codex). O instalador detecta os
-que existirem na máquina e configura cada um; se você instalar o outro depois,
-basta rodar o instalador de novo. Depois de instalar, escaneie o QR code que
-abre no navegador e reinicie o Claude Desktop (no Codex, o servidor entra na
-próxima sessão).
+[OpenAI Codex](https://developers.openai.com/codex). O instalador (Mac e
+Windows manual) detecta os que existirem e configura cada um; se você instalar
+o outro depois, basta rodar o instalador de novo. **Se o Claude estiver aberto,
+o instalador pede para fechá-lo antes de gravar a configuração** (com ele
+aberto, a configuração pode se perder) e, no fim, avisa quando pode abrir. No
+Codex, o servidor entra na próxima sessão.
+
+### Conferir se o Claude está lendo
+
+No painel (`http://localhost:8080`), o cartão **Ligação com o Claude** mostra:
+
+- quando o Claude leu pela última vez e se leu o banco **desta** instalação
+  (um aviso vermelho quando ele lê o banco de uma instalação antiga);
+- no Mac e no Windows manual, se a configuração do Claude tem o Lumnia Zap
+  apontando para esta instalação, com o botão **Reparar** (só com o Claude
+  fechado);
+- **Testar com o Claude**: o painel manda uma mensagem com um código para o
+  seu próprio número e mostra o pedido para colar no Claude; as marcas
+  *enviada → gravada no banco → o Claude achou* ficam verdes uma a uma.
+
+Quem acabou de instalar vê também o cartão **Primeiros passos**, que some
+quando tudo funciona e volta pelo rodapé do painel.
 
 ### O que ele faz
 
@@ -84,7 +115,7 @@ O painel abre em `http://localhost:8080` e é inacessível de fora da máquina.
 
 | Cliente | macOS | Windows |
 |---|---|---|
-| Claude Desktop | ✓ validado em uso real | ✓ beta, validado em PCs da família |
+| Claude Desktop | ✓ validado em uso real | ✓ Microsoft Store + extensão `.mcpb`; instalador manual como alternativa |
 | OpenAI Codex | ⚠ implementado, ainda não testado num Mac real | ⚠ implementado, ainda não testado num PC real |
 
 O registro no Codex segue o formato oficial da OpenAI

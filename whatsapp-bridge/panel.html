@@ -691,6 +691,11 @@ async function loadBeatitude() {
             <span class="st">"pensa melhor" ou "com calma" no pedido usa o opus naquela vez. O teste roda um Claude de sondagem (~20 s) e diz quais MCPs ele enxerga no modo rápido; se a agenda e o Gmail não aparecerem, deixe desligado.</span>
             <div id="bt-teste-rapido" class="st"></div>
           </div>
+          <div><b>Conectores</b>
+            o que o mordomo alcança da conta Claude desta pessoa:
+            ${(b.conectores || []).map(c => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" class="bt-con" value="${esc(c.id)}" ${c.ligado ? 'checked' : ''} onchange="btConectores()"> ${esc(c.nome)}</label>`).join('')}
+            <span class="st">Só funciona o que estiver ligado também em claude.ai → Configurações → Conectores. Desmarcar tira o conector do mordomo e do prompt dele.</span>
+          </div>
         </div>
         ${resumo}
         ${runs ? `<table><tr><th>Quando</th><th>Pedido</th><th>Resultado</th><th>Tempo</th></tr>${runs}</table>`
@@ -793,6 +798,10 @@ async function btDesparear() {
 async function btAjustar(ajustes) {
   try { await btPost('/api/panel/beatitude/ajustes', ajustes); } catch (e) { alert(e.message || e); }
   loadBeatitude();
+}
+function btConectores() {
+  const ids = Array.from(document.querySelectorAll('.bt-con')).filter(x => x.checked).map(x => x.value);
+  btAjustar({conectores: ids});
 }
 async function btTestarRapido(btn) {
   const out = $('bt-teste-rapido');

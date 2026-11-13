@@ -146,6 +146,16 @@ func instalar() error {
 	if err != nil {
 		return err
 	}
+	computador := nomeDoComputador()
+	fmt.Println("Computador:", computador)
+
+	// Store presente: o instalador clássico para aqui (doc 11, fase 3).
+	if loja := pacotesDaStore(home); len(loja) > 0 && !temArgumento(os.Args[1:], "--forcar") {
+		return fmt.Errorf("você já tem o " + produto + " da Microsoft Store neste PC.\n\n" +
+			"Não instale o antigo por cima: os dois disputam a mesma porta e o Claude acaba lendo o\n" +
+			"banco errado. Abra o " + produto + " pelo Menu Iniciar; se ele oferecer, aceite passar o\n" +
+			"histórico da instalação antiga para a da Store.")
+	}
 
 	// Quais agentes de IA existem neste PC. As duas checagens sao informativas
 	// e conservadoras — nunca bloqueiam a instalacao. O Codex e aditivo: quem
@@ -229,11 +239,19 @@ func instalar() error {
 		return fmt.Errorf("não consegui preparar o Python do servidor: %v", err)
 	}
 
+	// Fechar o Claude ANTES de gravar a configuração (doc 12).
+	if claudeDetectado {
+		if err := garantirClaudeFechado(); err != nil {
+			return err
+		}
+	}
+
 	etapa("Conectando ao Claude Desktop…")
 	// O Claude e configurado mesmo quando a deteccao nao o achou: a checagem
 	// e conservadora e a configuracao pronta nao atrapalha nada (era assim
 	// antes do Codex existir aqui, e continua).
-	if err := registrarNoClaude(home, destino, uv); err != nil {
+	claudesCfg, err := registrarNoClaude(home, destino, uv)
+	if err != nil {
 		return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
 	}
 
@@ -293,9 +311,18 @@ func instalar() error {
 			finalDoLog(logPath), logPath)
 	}
 
+	// Conferência (doc 12): a entrada continua lá depois da subida da ponte?
+	perdidas := conferirRegistros(claudesCfg)
+	if len(perdidas) > 0 && !claudeAbertoFn() {
+		for _, d := range perdidas {
+			_ = gravarConfig(d, destino, uv)
+		}
+		perdidas = conferirRegistros(claudesCfg)
+	}
+
 	abrirNavegador(painelURL)
 	fmt.Println()
-	fmt.Println(produto + " está instalado.")
+	fmt.Println(produto + " está instalado em " + computador + ".")
 	fmt.Println()
 	fmt.Println("Agentes de IA")
 	if claudeDetectado {
@@ -315,9 +342,15 @@ func instalar() error {
 	fmt.Println("A página que abriu mostra um QR code. Escaneie com o WhatsApp do seu")
 	fmt.Println("celular em Configurações → Aparelhos conectados.")
 	fmt.Println()
-	if claudeDetectado {
-		fmt.Println("Depois, saia do Claude Desktop pela bandeja (botão direito no ícone")
-		fmt.Println("perto do relógio → Sair) e abra de novo. Fechar no X não basta.")
+	for _, d := range perdidas {
+		fmt.Println("  [!!] A configuração em", d, "perdeu o lumnia-zap logo depois de gravada.")
+	}
+	if len(perdidas) > 0 {
+		fmt.Println("Saia do Claude pela bandeja (botão direito → Sair), rode este instalador de")
+		fmt.Println("novo e só abra o Claude no fim.")
+	} else if claudeDetectado {
+		fmt.Println("Depois, abra o Claude neste PC (" + computador + ") e peça:")
+		fmt.Println("\"liste minhas conversas do WhatsApp\".")
 	}
 	if codexDetectado && avisoCodex == "" {
 		fmt.Println("No Codex, o lumnia-zap já entra na próxima sessão.")
@@ -518,13 +551,13 @@ func ultimasLinhas(b []byte, n int) string {
 
 // registrarNoClaude adiciona o servidor MCP preservando o resto do arquivo,
 // que guarda tambem as preferencias pessoais do Claude Desktop.
-func registrarNoClaude(home, destino, uv string) error {
+func registrarNoClaude(home, destino, uv string) ([]string, error) {
 	alvos := pastasConfigClaude(home)
 	if len(alvos) == 0 {
-		return fmt.Errorf("não encontrei onde o Claude Desktop guarda a configuração")
+		return nil, fmt.Errorf("não encontrei onde o Claude Desktop guarda a configuração")
 	}
 	var ultimoErro error
-	gravou := 0
+	var gravadas []string
 	for _, dir := range alvos {
 		if err := gravarConfig(dir, destino, uv); err != nil {
 			ultimoErro = err
@@ -532,12 +565,12 @@ func registrarNoClaude(home, destino, uv string) error {
 			continue
 		}
 		fmt.Println("     lumnia-zap registrado em", filepath.Join(dir, "claude_desktop_config.json"))
-		gravou++
+		gravadas = append(gravadas, dir)
 	}
-	if gravou == 0 {
-		return ultimoErro
+	if len(gravadas) == 0 {
+		return nil, ultimoErro
 	}
-	return nil
+	return gravadas, nil
 }
 
 // pastasConfigClaude lista TODOS os lugares onde o Claude Desktop pode ler a
@@ -580,8 +613,7 @@ func gravarConfig(cfgDir, destino, uv string) error {
 			return fmt.Errorf("o arquivo de configuração do Claude parece corrompido; "+
 				"renomeie %s e tente de novo", cfgPath)
 		}
-		// backup antes de mexer
-		_ = os.WriteFile(cfgPath+".bak-lumnia-zap", raw, 0o600)
+		backupUmaVez(cfgPath, raw)
 	}
 
 	servidores, _ := cfg["mcpServers"].(map[string]any)
@@ -601,7 +633,7 @@ func gravarConfig(cfgDir, destino, uv string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfgPath, novo, 0o600)
+	return gravarJSONAtomico(cfgPath, novo)
 }
 
 // ------------------------------------------------------------------ servico

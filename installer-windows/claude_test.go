@@ -115,7 +115,7 @@ func TestRegistrarNoClaude_PreservaEGravaEmTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := registrarNoClaude(home, `C:\LumniaZap`, `C:\uv.exe`); err != nil {
+	if _, err := registrarNoClaude(home, `C:\LumniaZap`, `C:\uv.exe`); err != nil {
 		t.Fatal(err)
 	}
 

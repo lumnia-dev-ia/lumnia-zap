@@ -74,9 +74,14 @@ func instalar() error {
 	// dois configura os dois; quem tem so um segue como antes. So bloqueamos
 	// quando nao ha NENHUM cliente MCP para conectar.
 	anotar("Instalador %s · macOS %s · %s", produto, versaoMacOS(), runtime.GOARCH)
-	claudeOK := detectarClaude(home)
+	computador := nomeDoComputador()
+	anotar("Computador: %s", computador)
+	claudeApp := detectarClaude(home)
+	claudeCfg := configClaudeExiste(home)
+	claudeOK := claudeApp || claudeCfg
+	claudeSemApp := !claudeApp && claudeCfg
 	codexOK := detectarCodex(home)
-	anotar("Agentes detectados: Claude=%v Codex=%v", claudeOK, codexOK)
+	anotar("Agentes detectados: Claude=%v (app=%v config=%v) Codex=%v", claudeOK, claudeApp, claudeCfg, codexOK)
 	if !claudeOK && !codexOK {
 		if perguntar("Nenhum agente de IA encontrado",
 			"O "+produto+" funciona dentro do Claude Desktop (ou do OpenAI Codex), "+
@@ -106,6 +111,13 @@ func instalar() error {
 	}
 	destino := filepath.Join(home, "Library", "Application Support", "LumniaZap")
 
+	// Fechar o Claude ANTES de qualquer gravacao (doc 12).
+	if claudeOK {
+		if err := garantirClaudeFechado(); err != nil {
+			return err
+		}
+	}
+
 	// A partir daqui a instalacao pode demorar. Abre a tela de progresso para
 	// que ninguem fique olhando para uma tela parada sem saber se travou.
 	progressoAbrir()
@@ -124,6 +136,9 @@ func instalar() error {
 
 	etapa(2)
 	if err := os.MkdirAll(destino, 0o755); err != nil {
+		return err
+	}
+	if err := arrumarPastaDaPonte(destino); err != nil {
 		return err
 	}
 	if err := extrair(tgz, destino); err != nil {
@@ -154,6 +169,10 @@ func instalar() error {
 	var avisoCodex string
 	var claudesCfg []string
 	if claudeOK {
+		// Reaberto durante o download? Confere de novo antes de gravar.
+		if err := garantirClaudeFechado(); err != nil {
+			return err
+		}
 		claudesCfg, err = registrarNoClaude(home, destino, uv)
 		if err != nil {
 			return fmt.Errorf("falha ao configurar o Claude Desktop: %v", err)
@@ -186,6 +205,22 @@ func instalar() error {
 
 	anotar("Ponte no ar: %s respondeu", painelURL)
 
+	// Conferencia (doc 12): a entrada ainda esta la depois de ~40 s? Se o
+	// Claude foi aberto no meio e regravou o arquivo, regrava uma vez com ele
+	// fechado; se nao der, a tela final diz o que fazer.
+	perdidas := conferirRegistros(claudesCfg)
+	if len(perdidas) > 0 && !claudeAbertoFn() {
+		for _, d := range perdidas {
+			if err := gravarConfigClaude(d, destino, uv); err != nil {
+				anotar("Claude: regravar em %s falhou — %v", d, err)
+			}
+		}
+		perdidas = conferirRegistros(claudesCfg)
+	}
+	for _, d := range perdidas {
+		anotar("Claude: ATENÇÃO — a configuração em %s perdeu o lumnia-zap", d)
+	}
+
 	// O que o Mac do pai ensinou (17-10): a ponte subir hoje nao quer dizer
 	// que ela volta amanha. Conferimos agora e dizemos na cara o que falta.
 	confs := prontidao()
@@ -196,11 +231,19 @@ func instalar() error {
 		anotar("Relatório salvo em %s", relatorio)
 	}
 
-	progressoConcluir(resumoHTML(claudesCfg, codexOK, avisoCodex, relatorio))
+	progressoConcluir(resumoHTML(computador, claudesCfg, perdidas, claudeSemApp, codexOK, avisoCodex, relatorio))
 
 	proximo := ""
-	if claudeOK {
-		proximo += "Depois, feche o Claude Desktop com Cmd+Q e abra de novo.\n\n"
+	if claudeOK && len(perdidas) == 0 {
+		proximo += "Depois, abra o Claude neste Mac (" + computador + ") e peça: \"liste minhas conversas do WhatsApp\".\n\n"
+	}
+	if len(perdidas) > 0 {
+		proximo += "Atenção: a configuração do Claude perdeu o WhatsApp logo depois de gravada. " +
+			"Feche o Claude com Cmd+Q, rode este instalador de novo e só abra o Claude no fim.\n\n"
+	}
+	if claudeSemApp {
+		proximo += "Não achei o aplicativo Claude em Aplicativos; registrei na configuração que já existia. " +
+			"Se o Claude não estiver instalado neste Mac, instale de claude.ai/download.\n\n"
 	}
 	if len(claudesCfg) > 1 {
 		proximo += "Atenção: este Mac tem mais de uma instalação do Claude. " +
@@ -285,9 +328,10 @@ func jsString(s string) string {
 // resumoHTML e o bloco que aparece na tela de sucesso: onde o servidor MCP foi
 // registrado, de verdade, com caminho. Quem der suporte a distancia consegue
 // resolver so olhando esta tela.
-func resumoHTML(claudesCfg []string, codexOK bool, avisoCodex, relatorio string) string {
+func resumoHTML(computador string, claudesCfg, perdidas []string, claudeSemApp, codexOK bool, avisoCodex, relatorio string) string {
 	var b strings.Builder
 	b.WriteString(`<p class="sub" style="margin-top:28px"><b>Onde o WhatsApp foi conectado</b></p><pre>`)
+	b.WriteString("Computador: " + html.EscapeString(computador) + "\n")
 
 	switch len(claudesCfg) {
 	case 0:
@@ -307,6 +351,15 @@ func resumoHTML(claudesCfg []string, codexOK bool, avisoCodex, relatorio string)
 	}
 	b.WriteString(`</pre>`)
 
+	if len(perdidas) > 0 {
+		b.WriteString(`<p class="erro">A configuração do Claude perdeu o WhatsApp logo depois de gravada ` +
+			`(o Claude foi aberto durante a instalação?). Feche o Claude com Cmd+Q, rode o instalador de novo ` +
+			`e só abra o Claude no fim.</p>`)
+	}
+	if claudeSemApp {
+		b.WriteString(`<p class="erro">Não achei o aplicativo Claude em Aplicativos. Registrei na configuração ` +
+			`que já existia; se o Claude não estiver instalado neste Mac, instale de claude.ai/download.</p>`)
+	}
 	if len(claudesCfg) > 1 {
 		b.WriteString(`<p class="erro">Este Mac tem mais de uma instalação do Claude. ` +
 			`Configurei todas — mas o ideal é manter só uma.</p>`)
@@ -367,6 +420,7 @@ func salvarRelatorio(home string) string {
 	alvo := filepath.Join(home, "Desktop", "Lumnia-Zap-instalacao.txt")
 	texto := "Relatório de instalação do " + produto + "\n" +
 		time.Now().Format("02/01/2006 15:04:05") + "\n" +
+		"Computador: " + nomeDoComputador() + "\n" +
 		"macOS " + versaoMacOS() + " · " + runtime.GOARCH + "\n\n" +
 		diarioTexto() + "\n"
 	if err := os.WriteFile(alvo, []byte(texto), 0o600); err != nil {
@@ -691,10 +745,9 @@ func garantirClaudeCode(home string) (string, error) {
 
 const arquivoConfigClaude = "claude_desktop_config.json"
 
-// detectarClaude diz se ha Claude Desktop neste Mac. Conservador de proposito,
-// igual a deteccao do Codex: olha o caminho classico, a pasta de aplicativos do
-// proprio usuario e, por ultimo, a existencia de uma configuracao ja gravada —
-// nao achar nunca bloqueia sozinho a instalacao.
+// detectarClaude diz se o APLICATIVO Claude Desktop esta neste Mac: o caminho
+// classico e as pastas de aplicativos (do sistema e do usuario). Uma
+// configuracao gravada nao conta (ver configClaudeExiste).
 func detectarClaude(home string) bool {
 	if _, err := os.Stat(claudeApp); err == nil {
 		return true
@@ -708,6 +761,14 @@ func detectarClaude(home string) bool {
 			return true
 		}
 	}
+	return false
+}
+
+// configClaudeExiste: há configuração do Claude gravada em alguma pasta. NÃO
+// prova que o app está instalado — o próprio instalador cria esse arquivo, e
+// aceitar isso como prova mascarava um Mac sem Claude a partir da segunda
+// tentativa (doc 02, a pasta Claude-3p do teste de 17/09).
+func configClaudeExiste(home string) bool {
 	for _, dir := range configsDoClaude(home) {
 		if _, err := os.Stat(filepath.Join(dir, arquivoConfigClaude)); err == nil {
 			return true
@@ -812,8 +873,7 @@ func gravarConfigClaude(cfgDir, destino, uv string) error {
 			return fmt.Errorf("o arquivo de configuração do Claude parece corrompido; "+
 				"renomeie %s e tente de novo", cfgPath)
 		}
-		// backup antes de mexer
-		_ = os.WriteFile(cfgPath+".bak-lumnia-zap", raw, 0o600)
+		backupUmaVez(cfgPath, raw)
 	}
 
 	servidores, _ := cfg["mcpServers"].(map[string]any)
@@ -833,7 +893,7 @@ func gravarConfigClaude(cfgDir, destino, uv string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfgPath, novo, 0o600)
+	return gravarJSONAtomico(cfgPath, novo)
 }
 
 // ------------------------------------------------------------------ servico

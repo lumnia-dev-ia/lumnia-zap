@@ -200,11 +200,15 @@ func TestDiarioRegistraOndeGravou(t *testing.T) {
 	}
 }
 
-// detectarClaude nao pode dizer "nao tem Claude" num Mac que tem config gravado.
-func TestDetectarClaudePorConfigExistente(t *testing.T) {
+// Config gravada nao prova que o app esta instalado (doc 02): detectarClaude
+// olha so o aplicativo; configClaudeExiste diz que ha onde registrar.
+func TestDetectarClaudeNaoAceitaSoConfig(t *testing.T) {
 	home := t.TempDir()
 	semearConfig(t, filepath.Join(home, "Library", "Application Support", "Claude"), `{}`)
-	if !detectarClaude(home) {
-		t.Fatal("devia ter detectado o Claude pela configuração existente")
+	if detectarClaude(home) && !arquivoExiste(claudeApp) {
+		t.Fatal("config sozinha não pode valer como app instalado")
+	}
+	if !configClaudeExiste(home) {
+		t.Fatal("devia ter achado a configuração existente")
 	}
 }

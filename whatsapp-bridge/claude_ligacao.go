@@ -542,11 +542,20 @@ func onboardingHandler(w http.ResponseWriter, r *http.Request) {
 // "teste" e "onboarding".
 func ligacaoStatus(resp map[string]interface{}) {
 	meu := panelMetaGet("db_id")
-	resp["instalacao"] = map[string]interface{}{
+	inst := map[string]interface{}{
 		"tipo":       instalacaoTipo(),
 		"computador": computadorPonte(),
 		"db_id":      meu,
 	}
+	// Clássica com a da Store também instalada: os dois disputam a 8080 e o
+	// Claude acaba lendo o banco errado (caso do Douglas, 05/11).
+	if instalacaoTipo() == "windows-classica" {
+		local := os.Getenv("LOCALAPPDATA")
+		if achados, _ := filepath.Glob(filepath.Join(local, "Packages", "Lumnia.LumniaZap_*")); local != "" && len(achados) > 0 {
+			inst["store_tambem"] = true
+		}
+	}
+	resp["instalacao"] = inst
 	s := ultimoSinal()
 	claude := map[string]interface{}{}
 	if !s.Em.IsZero() {

@@ -415,6 +415,9 @@ function mostrarClaude(s) {
   const c = s.claude || {}, t = tipoInst(s), pc = esc((s.instalacao || {}).computador || 'este computador');
   const linhas = [];
   let reparar = false;
+  if ((s.instalacao || {}).store_tambem)
+    linhas.push(`<div class="flash err">Este PC também tem o Lumnia Zap da Microsoft Store. As duas versões disputam a mesma porta.</div>
+      <span class="st">Abra o Lumnia Zap pelo Menu Iniciar e aceite passar o histórico para a versão da Store. Esta instalação antiga fica guardada.</span>`);
   if (c.mesmo_banco === false) {
     linhas.push(`<div class="flash err">O Claude está lendo outro banco de mensagens, provavelmente de uma instalação antiga do Lumnia Zap.</div>
       <span class="st">${t === 'windows-store'

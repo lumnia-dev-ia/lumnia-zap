@@ -1,0 +1,88 @@
+name: Build MSIX (Microsoft Store)
+
+# Monta o pacote da Microsoft Store num runner Ubuntu, sem depender do
+# container de uma sessão (onde o makemsix e a identidade viviam até a 1.1.1).
+# O pacote sai SEM assinatura — quem assina é a Microsoft — e vira um artefato
+# do workflow; o envio ao Partner Center continua manual (upload > 10 MB).
+#
+# A identidade da Store não é segredo (está na página do produto e no PFN do
+# .mcpb), por isso vai aqui. Ver doc 05 do projeto.
+
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão do pacote (a.b.c.0, ex.: 1.1.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  STORE_NAME: Lumnia.LumniaZap
+  STORE_PUBLISHER: CN=FB51E774-4C60-4C60-960A-EF49417C6D0B
+  STORE_PUBLISHER_DISPLAY: Lumnia
+  STORE_PFN: Lumnia.LumniaZap_27md6avg2vwam
+
+jobs:
+  build-msix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp-bridge/go.mod
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Dependências do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 osslsigncode zip unzip python3-pil libicu-dev clang git
+          pip install --user "cmake>=3.29"
+
+      - name: makemsix (cache)
+        id: cache-makemsix
+        uses: actions/cache@v4
+        with:
+          path: ~/msix-packaging/.vs
+          key: makemsix-ubuntu-24.04-v1
+
+      - name: Compilar o makemsix
+        if: steps.cache-makemsix.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/microsoft/msix-packaging ~/msix-packaging
+          cd ~/msix-packaging
+          export PATH="$HOME/.local/bin:$PATH"
+          ./makelinux.sh --pack --skip-samples --skip-tests
+
+      - name: Identidade da Store
+        run: |
+          {
+            echo "STORE_NAME=\"$STORE_NAME\""
+            echo "STORE_PUBLISHER=\"$STORE_PUBLISHER\""
+            echo "STORE_PUBLISHER_DISPLAY=\"$STORE_PUBLISHER_DISPLAY\""
+            echo "STORE_PFN=\"$STORE_PFN\""
+          } > msix/identidade-store.env
+
+      - name: Montar o pacote (--store)
+        env:
+          LD_LIBRARY_PATH: /home/runner/msix-packaging/.vs/lib
+        run: MAKEMSIX="$HOME/msix-packaging/.vs/bin/makemsix" bash scripts/build-msix.sh "${{ inputs.versao }}" --store
+
+      - name: Conferir o conteúdo
+        run: |
+          f="dist-msix/Lumnia-Zap-${{ inputs.versao }}-store.msix"
+          test -f "$f"
+          unzip -l "$f" | grep -q "mcp/servidor/sinal.py"
+          unzip -l "$f" | grep -q "LumniaZap.exe"
+          ls -l dist-msix/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumnia-Zap-${{ inputs.versao }}-store
+          path: |
+            dist-msix/Lumnia-Zap-${{ inputs.versao }}-store.msix
+            dist-msix/lumnia-zap.mcpb
+          if-no-files-found: error

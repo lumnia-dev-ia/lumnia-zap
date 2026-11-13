@@ -20,7 +20,9 @@
 package comum
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -128,4 +130,21 @@ func Linha(f *os.File, formato string, args ...any) {
 		return
 	}
 	fmt.Fprintf(f, "%s  %s\r\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(formato, args...))
+}
+
+// statusCampoTipo lê instalacao.tipo do /api/panel/status.
+func statusCampoTipo() string {
+	c := http.Client{Timeout: 2 * time.Second}
+	r, err := c.Get(StatusEP)
+	if err != nil {
+		return ""
+	}
+	defer r.Body.Close()
+	var s struct {
+		Instalacao struct {
+			Tipo string `json:"tipo"`
+		} `json:"instalacao"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&s)
+	return s.Instalacao.Tipo
 }

@@ -27,6 +27,7 @@ import (
 	"unsafe"
 
 	"lumnia-zap/msix/comum"
+	"lumnia-zap/msix/migrar"
 )
 
 const createNoWindow = 0x08000000
@@ -55,16 +56,27 @@ func main() {
 		comum.Linha(log, "ponte: %s", ponteExe)
 		comum.Linha(log, "pasta de trabalho: %s", trabalho)
 
+		// Migracao da instalacao classica em andamento (LumniaZap.exe): nao
+		// sobe a ponte enquanto o historico e copiado (migrar.ArquivoPausa).
+		if _, err := os.Stat(migrar.ArquivoPausa(comum.PastaDados())); err == nil {
+			log.Close()
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		if comum.Vivo() {
 			// Outra ponte ja ocupa a 8080 (ex.: instalacao classica ligada).
 			comum.Linha(log, "porta 8080 ja responde — outra ponte rodando? aguardando 60 s")
+			migrar.GravarConflito(comum.PastaDados(), "porta 8080 ocupada por outra ponte (instalação clássica?)", time.Now())
 			log.Close()
 			time.Sleep(60 * time.Second)
 			continue
 		}
+		_ = os.Remove(filepath.Join(comum.PastaDados(), "conflito.json"))
 
 		cmd := exec.Command(ponteExe)
 		cmd.Dir = trabalho
+		// a ponte se identifica como da Store no painel (claude_ligacao.go)
+		cmd.Env = append(os.Environ(), "LUMNIA_ZAP_INSTALACAO=windows-store")
 		if log != nil { // sem log, a saida e descartada
 			cmd.Stdout = log
 			cmd.Stderr = log

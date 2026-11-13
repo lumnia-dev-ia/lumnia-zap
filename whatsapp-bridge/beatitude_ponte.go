@@ -158,8 +158,11 @@ func ponteRodada() {
 	ponteSincronizarFotos() // uma vez por dia; so quem esta em Pessoas e nao tem foto
 	ponteEnviarAgenda()     // agenda do iPhone para o brief (agenda_apple_ponte.go); sai cedo sem agenda
 	ponteMensagensDoGrupo()
-	ponteExecutar() // primeiro o que ja tem sim
+	ponteBuscarContatos() // telefone de quem o app pediu pelo nome (beatitude_contatos.go)
+	ponteExecutar()       // primeiro o que ja tem sim
 	pontePreparar()
+	falasFlush()    // falas do grupo que ainda nao chegaram ao app (beatitude_falas.go)
+	falasBackfill() // uma vez por instalacao: os ultimos dias do grupo
 }
 
 func ponteErro(err error) {
@@ -561,7 +564,7 @@ func ponteTentarPreparar(claude string, a ponteAcaoPreparar) bool {
 	if chat == "" {
 		return false
 	}
-	if n := beatitudeRunsDesde(time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
+	if n := beatitudeRunsPrefixo("preparar:", time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
 		ponteEsquecer(a.ID)
 		return false
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/mdp/qrterminal"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"rsc.io/qr"
 )
@@ -277,8 +278,11 @@ func apiSendsSince(t time.Time) int {
 	if panel.store == nil {
 		return 0
 	}
+	// As respostas do mordomo no grupo Beatitude (so a propria pessoa esta
+	// nele) nao sao envio a terceiros: ficam fora do teto. Antes contavam, e
+	// uma madrugada de conversa no grupo travava o "sim" e os agendados (10-11).
 	_ = panel.store.db.QueryRow(
-		`SELECT COUNT(*) FROM panel_api_sends WHERE sent_at >= ?`, t).Scan(&n)
+		`SELECT COUNT(*) FROM panel_api_sends WHERE sent_at >= ? AND COALESCE(source,'') <> 'beatitude'`, t).Scan(&n)
 	return n
 }
 
@@ -294,6 +298,29 @@ func panelSend(recipient, message, source string) (bool, string) {
 		recordAPISend(recipient, source)
 	}
 	return ok, msg
+}
+
+// gravarEnviada poe no banco local uma mensagem de texto que a propria ponte
+// enviou (o WhatsApp nao a devolve como evento). Usa o ID real devolvido pelo
+// servidor, para nao duplicar se um dia ela vier por sincronizacao.
+func gravarEnviada(client *whatsmeow.Client, chat types.JID, id types.MessageID, texto string, quando time.Time) {
+	store := panel.store
+	if store == nil || strings.TrimSpace(texto) == "" || id == "" {
+		return
+	}
+	if quando.IsZero() {
+		quando = time.Now()
+	}
+	jid := chat.String()
+	remetente := ""
+	if client != nil && client.Store != nil && client.Store.ID != nil {
+		remetente = client.Store.ID.User
+	}
+	_, _ = store.db.Exec(`INSERT OR IGNORE INTO chats (jid, name, last_message_time) VALUES (?, '', ?)`, jid, quando)
+	_, _ = store.db.Exec(`UPDATE chats SET last_message_time = ? WHERE jid = ? AND (last_message_time IS NULL OR last_message_time < ?)`, quando, jid, quando)
+	if err := store.StoreMessage(string(id), jid, remetente, texto, quando, true, "", "", "", nil, nil, nil, 0); err != nil && panel.logger != nil {
+		panel.logger.Warnf("Falha ao gravar mensagem enviada para %s: %v", jid, err)
+	}
 }
 
 // ---------------------------------------------------------------- agendamentos
@@ -420,6 +447,10 @@ func startPanelScheduler() {
 	panel.logger.Infof("Painel: agendador ativo (fuso %s)", panelLoc)
 }
 
+// panelAoRodarAgendamento, quando definido (modulo Beatitude), e avisado de
+// cada agendamento tratado: status "enviada", "falhou: ..." ou "perdida ...".
+var panelAoRodarAgendamento func(id int64, status string, quando time.Time)
+
 func runDueSchedules() {
 	panel.mu.RLock()
 	store, client := panel.store, panel.client
@@ -485,6 +516,9 @@ func runDueSchedules() {
 		}
 		if p.s.Mode == "once" {
 			_, _ = store.db.Exec(`UPDATE panel_schedules SET enabled = 0 WHERE id = ?`, p.s.ID)
+		}
+		if panelAoRodarAgendamento != nil {
+			panelAoRodarAgendamento(p.s.ID, status, p.occ)
 		}
 	}
 }

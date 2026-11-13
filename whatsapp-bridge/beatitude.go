@@ -51,7 +51,7 @@ const (
 	beatitudeModeloPadrao = "sonnet" // o mordomo acha conversa, resume e escreve rascunho curto; "pensa melhor" no pedido chama o opus
 	beatitudeModeloForte  = "opus"
 	beatitudeMCPURL       = "https://beatitude.lumnia.dev/mcp"
-	beatitudeMaxPorHora   = 15
+	beatitudeMaxPorHora   = 30            // era 15; em 10-11 a Lisiane bateu 15 em 21 minutos de uso normal
 	beatitudeJanelaAtraso = 6 * time.Hour // pedido mais velho que isso (Mac dormindo) e ignorado
 	beatitudeMaxChars     = 3500          // por mensagem enviada ao grupo
 )
@@ -139,6 +139,9 @@ type beatitudeConfig struct {
 	ModoRapido   bool      `json:"modo_rapido"`           // --strict-mcp-config: so Zap + Beatitude, sem os outros MCPs da conta (ver beatitudeMCPConfig)
 	ConsentidoEm time.Time `json:"consentido_em"`
 	UltimoPedido time.Time `json:"ultimo_pedido"` // timestamp do ultimo pedido ja processado
+	// Falas do grupo espelhadas no app (beatitude_falas.go): quando o backfill
+	// dos ultimos dias foi feito. Zero = ainda nao.
+	FalasBackfillEm time.Time `json:"falas_backfill_em,omitempty"`
 }
 
 type beatitudePedido struct {
@@ -382,7 +385,38 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	primeiro := pedidos[0].Hora
 	medida.EsperaMs = time.Since(primeiro).Milliseconds()
 
+	// Teto (10-11): conferido ANTES de ouvir o audio, para o grupo nao dizer
+	// "ouvindo o áudio… entendi assim" e so depois recusar. Tarefas de
+	// navegador ja aprovadas seguem; o resto recebe um aviso so, com a hora
+	// em que libera, e nao conta como pedido.
+	if n, libera := beatitudeTeto(); n >= beatitudeMaxPorHora {
+		var falas []falaGrupo
+		temAudio := false
+		for _, p := range pedidos {
+			switch {
+			case p.Navegador > 0:
+				beatitudeExecutarNavegador(p.Navegador)
+			case p.Audio:
+				temAudio = true
+				falas = append(falas, falaNova(p.ID, p.Hora, "[áudio]", "audio"))
+			case p.Texto != "" && !falaEhRuido(p.Texto):
+				falas = append(falas, falaNova(p.ID, p.Hora, p.Texto, "texto"))
+			}
+		}
+		if len(falas) == 0 && !temAudio {
+			return
+		}
+		aviso := beatitudeAvisoTeto(libera, temAudio)
+		beatitudeSend(beatitudeMarca + ": " + aviso)
+		falasRegistrar(falas)
+		if len(falas) > 0 {
+			falasResponder(falas[len(falas)-1], aviso, nil)
+		}
+		return
+	}
+
 	var textos []string
+	var falasLote []falaGrupo // o que vai ao app como "via WhatsApp" (beatitude_falas.go)
 	for _, p := range pedidos {
 		if p.Navegador > 0 {
 			beatitudeExecutarNavegador(p.Navegador)
@@ -395,30 +429,40 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 			medida.TranscricaoMs += time.Since(t0).Milliseconds()
 			if err != nil {
 				beatitudeSend(beatitudeMarca + ": " + beatitudeCurto(err.Error(), 200) + ". Se puder, escreva o pedido.")
+				f := falaNova(p.ID, p.Hora, "[áudio]", "audio")
+				falasResponder(f, "Não consegui ouvir o áudio: "+beatitudeCurto(err.Error(), 200), nil)
 				continue
 			}
 			beatitudeSend(beatitudeMarca + ": entendi assim: \"" + beatitudeCurto(t, 600) + "\"")
 			textos = append(textos, t)
+			if !falaEhRuido(t) {
+				falasLote = append(falasLote, falaNova(p.ID, p.Hora, t, "audio"))
+			}
 			continue
 		}
 		if p.Texto != "" {
 			textos = append(textos, p.Texto)
+			if !falaEhRuido(p.Texto) {
+				falasLote = append(falasLote, falaNova(p.ID, p.Hora, p.Texto, "texto"))
+			}
 		}
 	}
 	if len(textos) == 0 {
 		return
 	}
 	pedido := strings.Join(textos, "\n")
-
-	if n := beatitudeRunsDesde(time.Now().Add(-time.Hour)); n >= beatitudeMaxPorHora {
-		beatitudeSend(fmt.Sprintf("%s: já fiz %d pedidos na última hora, que é o meu teto. Tente de novo daqui a pouco.", beatitudeMarca, n))
-		return
+	falasRegistrar(falasLote) // aparece no app antes mesmo da resposta
+	var ultimaFala falaGrupo
+	if len(falasLote) > 0 {
+		ultimaFala = falasLote[len(falasLote)-1]
 	}
 
 	claude, err := beatitudeAcharClaude()
 	if err != nil {
-		beatitudeSend(beatitudeMarca + ": não encontrei o Claude Code neste " + maquina() + ". Abra o painel do Lumnia Zap para ver como instalar.")
+		aviso := "não encontrei o Claude Code neste " + maquina() + ". Abra o painel do Lumnia Zap para ver como instalar."
+		beatitudeSend(beatitudeMarca + ": " + aviso)
 		beatitudeRegistrar(time.Now(), pedido, "", "erro", err.Error())
+		falasResponder(ultimaFala, aviso, nil)
 		return
 	}
 
@@ -433,14 +477,16 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	medida.CustoUSD, medida.Modelo, medida.Sessao = m.CustoUSD, m.Modelo, m.Sessao
 	if err != nil {
 		panel.logger.Warnf("Beatitude: falha na execucao: %v", err)
-		beatitudeSend(beatitudeMarca + ": não consegui terminar desta vez (" + beatitudeCurto(err.Error(), 160) + "). Tente de novo em alguns minutos.")
+		aviso := "não consegui terminar desta vez (" + beatitudeCurto(err.Error(), 160) + "). Tente de novo em alguns minutos."
+		beatitudeSend(beatitudeMarca + ": " + aviso)
 		medida.TotalMs = time.Since(primeiro).Milliseconds()
 		beatitudeRegistrarMedido(inicio, pedido, "", "erro", err.Error(), &medida)
+		falasResponder(ultimaFala, aviso, nil)
 		return
 	}
 	t1 := time.Now()
 	resposta, propostaNav := beatitudeSepararNavegador(resposta)
-	visivel, rascunhos := beatitudeSepararRascunhos(resposta, grupo)
+	visivel, rascunhos := beatitudeSepararRascunhos(resposta, grupo, pedido)
 	if visivel != "" {
 		for _, parte := range beatitudePartir(visivel, beatitudeMaxChars) {
 			beatitudeSend(beatitudeMarca + "\n\n" + parte)
@@ -453,6 +499,16 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	}
 	if propostaNav != "" {
 		beatitudeSend(beatitudeMarca + "\n\n" + propostaNav)
+	}
+	{ // o que a pessoa viu no grupo vai ao app, ligado a ultima fala do lote
+		var locais []falaAcaoLocal
+		if rascunhos != "" {
+			locais = append(locais, falaAcaoLocal{Tipo: "outro", Resumo: "Rascunho de mensagem no grupo, esperando o seu \"envia N\""})
+		}
+		if propostaNav != "" {
+			locais = append(locais, falaAcaoLocal{Tipo: "chrome", Resumo: "Tarefa no navegador proposta no grupo, esperando o seu \"abre\""})
+		}
+		falasResponder(ultimaFala, visivel, locais)
 	}
 	medida.EntregaMs = time.Since(t1).Milliseconds()
 	medida.TotalMs = time.Since(primeiro).Milliseconds()
@@ -478,7 +534,8 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"Responda em português do Brasil, em segunda pessoa, sem elogio, sem hype e sem exclamação. Curto: a resposta vai ser lida no celular.",
 		"Formatação de WhatsApp: *negrito* com um asterisco, listas com hífen. Nada de títulos com #, nada de tabelas.",
 		"Você só LÊ. Não existe ferramenta de envio para você. O que você escrever na resposta final é o que a ponte vai mandar ao grupo, e só ao grupo.",
-		"Rascunhos de resposta NÃO vão no texto visível. Coloque-os, no fim da resposta, num bloco exatamente assim: <rascunhos>[{\"n\":1,\"chat_jid\":\"JID exato da conversa, como veio das ferramentas\",\"texto\":\"o rascunho\"}]</rascunhos>. Numere a partir de 1, na mesma ordem em que citou as conversas no texto visível. A ponte mostra cada rascunho com o nome real da conversa e a pessoa decide se envia respondendo 'envia 1'. Nunca diga que você não pode enviar: diga que ela pode aprovar o envio.",
+		"Rascunhos de resposta NÃO vão no texto visível. Coloque-os, no fim da resposta, num bloco exatamente assim: <rascunhos>[{\"n\":1,\"chat_jid\":\"JID exato da conversa, como veio das ferramentas\",\"texto\":\"o rascunho\",\"enviar_em\":\"só quando ela pediu horário: AAAA-MM-DD HH:MM\"}]</rascunhos>. Numere a partir de 1, na mesma ordem em que citou as conversas no texto visível. A ponte mostra cada rascunho com o nome real da conversa e a pessoa decide se envia respondendo 'envia 1'. Nunca diga que você não pode enviar: diga que ela pode aprovar o envio.",
+		"Mensagem com horário: se ela pedir que a mensagem saia num horário (\"às 8h30 responde a Marina\", \"amanhã às 7 manda para o Pedro\"), ponha no rascunho \"enviar_em\":\"AAAA-MM-DD HH:MM\" (horário de Brasília; a hora de agora está no fim destas regras). A ponte guarda e só envia nesse horário, depois do sim dela; serve para QUALQUER conversa do WhatsApp, esteja a pessoa em Pessoas ou não. Para quem está em Pessoas, criar_acao com horário também serve; se criar_acao não devolver número para o sim (contato fora de Pessoas, aguardando contato), use o rascunho com enviar_em, sem criar as duas coisas. Nunca ofereça envio imediato de algo que ela pediu para um horário. Se o horário for ambíguo (\"às 8\" de manhã ou de noite), pergunte em uma linha.",
 		"Escreva os rascunhos na voz da pessoa, em primeira pessoa, curtos, no tom que ela já usa com aquele contato.",
 		"Não escreva no texto visível instruções de como enviar (a ponte já escreve) nem repita os rascunhos.",
 		"Quando a pessoa pedir para responder ou mandar algo a alguém (\"responde a Lisiane que...\", \"manda pro Pedro...\"), ache a conversa certa com as ferramentas, escreva o rascunho no bloco e, no texto visível, diga em uma linha para quem vai e de que se trata. Se houver mais de uma conversa possível, pergunte qual.",
@@ -492,6 +549,9 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"Caderno: se ela pedir para anotar no caderno, completar a nota de alguém ou do Eu (\"anota no meu caderno que...\", \"completa a nota da minha mãe\"), chame ler_roteiro('caderno') e siga. Antes de escrever um rascunho para alguém do círculo, chame ler_caderno com pessoa=<nome> e use o que a nota diz (como ela escreve para essa pessoa, do que a pessoa gosta, datas); o que está no caderno é a verdade dela, não invente além.",
 		"Nunca diga que abriu, começou, autorizou ou fez algo no Chrome ou no navegador: neste passo você não tem navegador, e quem abre o Chrome é a ponte, depois da resposta *abre*. Se ela parecer autorizar uma tarefa de navegador com outras palavras, responda só: \"Para eu abrir o Chrome, responda *abre*.\"",
 		"Navegador: você não usa o navegador neste passo. Se o pedido exigir um site (cadastro, reserva, formulário, consulta que pede login), NÃO tente; no fim da resposta proponha um bloco <navegador>{\"tarefa\":\"descrição completa e autocontida: site, o que fazer, quais dados dela usar e onde parar\"}</navegador>. A ponte mostra a tarefa e pede autorização; outro passo, com o Chrome, executa. Um bloco por resposta. Não escreva instruções de autorização no texto visível.",
+		"Navegador só de consulta: se a tarefa é apenas buscar e ler em sites públicos (voos, hotéis, preços, horários, disponibilidade), acrescente \"leitura\":true ao bloco: <navegador>{\"tarefa\":\"...\",\"leitura\":true}</navegador>. Essa roda na hora, sem autorização, e volta ao grupo com opções numeradas. No texto visível diga em uma linha que vai buscar. Compra, reserva, cadastro ou qualquer coisa que preencha dados dela NUNCA é leitura.",
+		"Viagem (passagem, hotel): primeiro uma tarefa de leitura com origem, destino, datas, período do dia e preferências dela; a tarefa deve pedir até 3 opções por sentido, numeradas em sequência (ida 1-3, volta 4-6), com companhia, horários e preço lidos da página. Quando ela escolher pelos números, proponha a tarefa de compra (sem leitura) com a opção exata, o valor visto e a instrução de ir até o pagamento, escolher PIX e trazer o código; os dados dela o passo do Chrome lê do Caderno — NÃO copie documento, nascimento ou telefone para a tarefa.",
+		"Restaurante, salão, consultório e outros lugares que atendem por WhatsApp: a reserva é uma mensagem ao lugar, não uma tarefa de navegador. Ache o contato nos dados dela (ou o número no site, por WebSearch, e diga de onde veio), escreva o rascunho no bloco de rascunhos com dia, horário, quantas pessoas e o nome dela, e no texto visível diga para onde vai. Quando o lugar responder, confirme no grupo e, se confirmado, crie o evento na agenda dela com o endereço. Dúvida do lugar (sinal, nome completo) volta como novo rascunho; nunca responda ao lugar sem o sim.",
 		"O pedido pode vir de um áudio transcrito: corrija o que a transcrição erra. \"arroba\" é @, \"ponto com\" é .com, \"ponto com ponto br\" é .com.br, e-mails ditos por partes devem ser remontados; nomes parecidos com contatos dela são esses contatos. Na dúvida sobre um nome, e-mail ou horário, pergunte em uma linha antes de agir.",
 		"Economia de rodadas: a ponte já leu o banco do WhatsApp e entrega no pedido um bloco \"Contexto pronto\" com as pessoas do círculo (nome e chat_jid), as conversas candidatas a pendente e as últimas mensagens de quem o pedido cita. Use esse bloco antes de qualquer ferramenta; chame list_messages só para uma conversa que não veio nele, e list_chats ou search_contacts só se o nome não aparecer. Não repita o que o bloco já tem.",
 		"ler_perfil e listar_pessoas do Beatitude: chame só quando o pedido depender de parentesco ou papel (\"minha esposa\", \"meu sócio\", \"os meninos\") e o nome não estiver claro no contexto pronto, ou quando precisar de fatos e ganchos sobre a pessoa para escrever melhor. Um pedido que já diz o nome não precisa deles.",
@@ -691,12 +751,8 @@ func beatitudeSend(texto string) {
 	ok, msg := sendWhatsAppMessage(panel.client, grupo, texto, "")
 	if ok {
 		recordAPISend(grupo, "beatitude")
-		// mensagens enviadas pela propria ponte nao voltam como evento; grava
-		// aqui para o historico do grupo (contexto da proxima conversa) ficar inteiro
-		if panel.store != nil {
-			_ = panel.store.StoreMessage(fmt.Sprintf("beatitude-%d", time.Now().UnixNano()), grupo, "",
-				texto, time.Now(), true, "", "", "", nil, nil, nil, 0)
-		}
+		// a mensagem ja foi gravada no historico do grupo por sendWhatsAppMessage
+		// (gravarEnviada), com o ID real
 	} else if panel.logger != nil {
 		panel.logger.Warnf("Beatitude: falha ao enviar ao grupo: %s", msg)
 	}
@@ -926,13 +982,73 @@ func beatitudeResumoMedidas(n int) map[string]interface{} {
 	return out
 }
 
-func beatitudeRunsDesde(t time.Time) int {
+// Pedidos que nao sao conversa dela no grupo: preparo de acoes do app, tarefas
+// de navegador e o teste do painel. Ficam fora do teto do mordomo (10-11).
+var beatitudeRunsDeFundo = []string{"preparar:", "navegador:", "teste:"}
+
+// beatitudeTeto conta os pedidos dela no grupo na ultima hora e diz quando
+// abre a proxima vaga (uma hora depois do pedido que precisa sair da janela).
+func beatitudeTeto() (int, time.Time) {
+	if panel.store == nil {
+		return 0, time.Time{}
+	}
+	desde := time.Now().Add(-time.Hour)
+	q := `SELECT iniciado_em FROM beatitude_runs WHERE iniciado_em >= ? AND status = 'ok'`
+	for _, p := range beatitudeRunsDeFundo {
+		q += ` AND pedido NOT LIKE '` + p + `%'`
+	}
+	rows, err := panel.store.db.Query(q+` ORDER BY iniciado_em`, desde)
+	if err != nil {
+		return 0, time.Time{}
+	}
+	defer rows.Close()
+	var horas []time.Time
+	for rows.Next() {
+		var t time.Time
+		if rows.Scan(&t) == nil {
+			horas = append(horas, t)
+		}
+	}
+	return len(horas), beatitudeLiberaEm(horas, beatitudeMaxPorHora)
+}
+
+// beatitudeLiberaEm: com horas em ordem crescente, a vaga abre quando sai da
+// janela de uma hora o pedido na posicao len-max (o mais antigo que ainda
+// segura o teto). Abaixo do teto, devolve zero.
+func beatitudeLiberaEm(horas []time.Time, max int) time.Time {
+	if max <= 0 || len(horas) < max {
+		return time.Time{}
+	}
+	return horas[len(horas)-max].Add(time.Hour)
+}
+
+func beatitudeAvisoTeto(libera time.Time, audio bool) string {
+	s := fmt.Sprintf("cheguei ao limite de %d pedidos por hora", beatitudeMaxPorHora)
+	if !libera.IsZero() {
+		// arredonda para cima: "libero às 05:28" nunca antes da hora real
+		l := libera.In(panelLoc).Add(59 * time.Second).Truncate(time.Minute)
+		s += ". Libero às *" + l.Format("15:04") + "*"
+		if min := int(time.Until(l).Round(time.Minute).Minutes()); min > 0 {
+			s += fmt.Sprintf(" (em %d min)", min)
+		}
+	}
+	if audio {
+		s += ". Não ouvi o áudio: mande de novo a partir daí."
+	} else {
+		s += ". Mande de novo a partir daí; nada do que você escreveu agora foi feito."
+	}
+	return s
+}
+
+// beatitudeRunsPrefixo conta execucoes ok de um tipo (ex.: "preparar:") na janela.
+func beatitudeRunsPrefixo(prefixo string, t time.Time) int {
 	var n int
 	if panel.store == nil {
 		return 0
 	}
 	_ = panel.store.db.QueryRow(
-		`SELECT COUNT(*) FROM beatitude_runs WHERE iniciado_em >= ? AND status = 'ok'`, t).Scan(&n)
+		`SELECT COUNT(*) FROM beatitude_runs WHERE iniciado_em >= ? AND status = 'ok' AND pedido LIKE ?`,
+		t, prefixo+"%").Scan(&n)
 	return n
 }
 
@@ -1434,11 +1550,7 @@ func beatitudeCriarGrupo() (string, error) {
 	}
 	boasVindas := beatitudeMarca + "\nEste grupo é só seu. Escreva ou mande um áudio com o que precisa; a resposta chega aqui."
 	if ok, msg := sendWhatsAppMessage(panel.client, jid, boasVindas, ""); ok {
-		recordAPISend(jid, "beatitude")
-		if panel.store != nil {
-			_ = panel.store.StoreMessage(fmt.Sprintf("beatitude-%d", time.Now().UnixNano()), jid, "",
-				boasVindas, time.Now(), true, "", "", "", nil, nil, nil, 0)
-		}
+		recordAPISend(jid, "beatitude") // gravada no historico por sendWhatsAppMessage
 	} else {
 		panel.logger.Warnf("Beatitude: grupo criado, mas a primeira mensagem falhou: %s", msg)
 	}

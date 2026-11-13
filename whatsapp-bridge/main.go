@@ -476,10 +476,18 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	}
 
 	// Send message
-	_, err = client.SendMessage(context.Background(), recipientJID, msg)
+	resp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
 		return false, fmt.Sprintf("Error sending message: %v", err)
+	}
+
+	// O WhatsApp nao devolve como evento o que este mesmo aparelho enviou.
+	// Sem gravar aqui, a conversa no banco local fica sem a mensagem: o
+	// mordomo "nao acha" o que a ponte mandou e a conversa continua parecendo
+	// pendente (10-11, caso da Marina).
+	if mediaPath == "" {
+		gravarEnviada(client, recipientJID, resp.ID, message, resp.Timestamp)
 	}
 
 	return true, fmt.Sprintf("Message sent to %s", recipient)

@@ -134,7 +134,10 @@ func ensurePanelTables(store *MessageStore) error {
 		created_at  TIMESTAMP NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_panel_sends_at ON panel_api_sends(sent_at);`)
-	return err
+	if err != nil {
+		return err
+	}
+	return panelMetaCriar(store.db) // identidade do banco (claude_ligacao.go)
 }
 
 // panelConnect conecta sem bloquear. Essencial: se a sessao morreu, o processo
@@ -588,6 +591,7 @@ func registerPanelRoutes() {
 	http.HandleFunc("/api/panel/schedules", h(panelSchedulesHandler))
 	http.HandleFunc("/api/panel/schedules/toggle", h(panelToggleHandler))
 	http.HandleFunc("/api/panel/schedules/delete", h(panelDeleteHandler))
+	registrarRotasLigacao(h)
 
 	panel.logger.Infof("Painel disponivel em http://localhost:8080")
 }
@@ -650,6 +654,7 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())
 	}
+	ligacaoStatus(resp) // instalação, sinal do Claude, teste e primeiros passos
 	if qrActive {
 		// O WhatsApp rotaciona o codigo a cada ~20s.
 		remaining := 20 - int(time.Since(qrSetAt).Seconds())

@@ -20,6 +20,17 @@ from whatsapp import (
 # Initialize FastMCP server
 mcp = FastMCP("whatsapp")
 
+# Sinal do Claude para a ponte (sinal.py): cada ferramenta registrada daqui
+# em diante avisa o painel que o Claude leu, e de qual banco.
+# Opcional: um pacote montado sem o sinal.py continua funcionando, só sem o
+# sinal (os scripts de release listam os arquivos um a um).
+try:
+    import sinal as _sinal
+    from whatsapp import MESSAGES_DB_PATH as _DB
+    _sinal.instalar(mcp, _DB)
+except ImportError:
+    pass
+
 @mcp.tool()
 def search_contacts(query: str) -> List[Dict[str, Any]]:
     """Search WhatsApp contacts by name or phone number.

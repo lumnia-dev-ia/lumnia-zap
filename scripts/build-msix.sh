@@ -109,10 +109,11 @@ pip install -q --disable-pip-version-check --no-compile --target "$STAGE/mcp/sit
   --only-binary=:all: --no-deps -r "$DIST/cache/req-win.txt"
 rm -rf "$STAGE/mcp/site-packages/bin"
 
-for f in main.py whatsapp.py audio.py agenda.py; do
+for f in main.py whatsapp.py audio.py agenda.py sinal.py; do
   cp "$RAIZ/whatsapp-mcp-server/$f" "$STAGE/mcp/servidor/$f"
 done
 grep -q LUMNIA_ZAP_STORE "$STAGE/mcp/servidor/whatsapp.py" || falhar "whatsapp.py sem LUMNIA_ZAP_STORE"
+[ -f "$STAGE/mcp/servidor/sinal.py" ] || falhar "pacote sem sinal.py (sinal do Claude para o painel)"
 
 # .pyc pre-compilados (a pasta do pacote e somente leitura; sem isto o
 # Python recompila tudo a cada vez que o Claude abre o servidor)

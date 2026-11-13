@@ -119,6 +119,15 @@
     <span class="hint" id="clock"></span>
   </header>
 
+  <!-- PRIMEIROS PASSOS (claude_ligacao.go) — some quando concluído; volta pelo rodapé -->
+  <div class="card" id="onb" style="display:none">
+    <h2>Primeiros passos</h2>
+    <div id="onb-passos"></div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn ghost" onclick="onbConcluir(true)">Já está tudo certo, esconder</button>
+    </div>
+  </div>
+
   <!-- STATUS -->
   <div class="card">
     <div class="status">
@@ -131,6 +140,18 @@
       <div class="spacer"></div>
       <button class="btn ghost" id="btn-rec" onclick="doReconnect(this)">Reconectar</button>
       <button class="btn danger" id="btn-unlink" onclick="doUnlink()">Desvincular</button>
+    </div>
+  </div>
+
+  <!-- LIGAÇÃO COM O CLAUDE (claude_ligacao.go) -->
+  <div class="card" id="claude-card">
+    <h2>Ligação com o Claude</h2>
+    <div id="claude-estado" class="empty">carregando…</div>
+    <div id="claude-teste"></div>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn ghost" id="btn-testar" onclick="testarClaude(this)">Testar com o Claude</button>
+      <button class="btn ghost" id="btn-reparar" style="display:none" onclick="repararClaude(this)">Reparar a configuração do Claude</button>
+      <span class="flash" id="claude-flash"></span>
     </div>
   </div>
 
@@ -287,6 +308,7 @@ launchctl kickstart -k gui/$(id -u)/dev.lumnia.zap</pre>
 
   <footer>Painel local em localhost · inacessível fora desta máquina ·
     <a href="https://lumnia.dev" target="_blank" rel="noopener">lumnia.dev</a>
+    · <a href="#" onclick="return onbConcluir(false)">Primeiros passos</a>
     <span id="bt-link"> · <a href="/beatitude" onclick="return btAbrir()">Beatitude</a></span></footer>
 </div>
 
@@ -350,6 +372,8 @@ async function refreshStatus() {
     $('versao').textContent = s.version ? 'v' + s.version : 'versão desconhecida';
     mostrarAtualizacao(s.atualizacao);
     mostrarProntidao(s.prontidao);
+    mostrarClaude(s);
+    mostrarOnboarding(s);
 
     $('btn-unlink').style.display = s.connected ? '' : 'none';
     $('pairing').classList.toggle('show', !!s.needs_pair);
@@ -366,6 +390,143 @@ setInterval(() => {
   $('qrtxt').textContent = qrRemaining > 0
     ? `expira em ${qrRemaining} s · renova sozinho` : 'renovando…';
 }, 1000);
+
+/* ---------- ligação com o Claude (claude_ligacao.go) ---------- */
+const PAINEL_HDR = { 'Content-Type': 'application/json', 'X-Lumnia-Painel': '1' };
+const painelPost = (path, body) => api(path, { method: 'POST', headers: PAINEL_HDR, body: JSON.stringify(body || {}) });
+let ultimoStatus = null;
+function tipoInst(s) { return ((s || {}).instalacao || {}).tipo || ''; }
+function comoSairDoClaude(t) {
+  return t.startsWith('windows')
+    ? 'saia do Claude pela bandeja (botão direito no ícone perto do relógio → <b>Sair</b>; o X não fecha)'
+    : 'feche o Claude com <b>Cmd+Q</b>';
+}
+function copiar(texto, btn) {
+  const ok = () => { if (btn) { const t = btn.textContent; btn.textContent = 'copiado'; setTimeout(() => btn.textContent = t, 1500); } };
+  if (navigator.clipboard) navigator.clipboard.writeText(texto).then(ok, () => {}); else ok();
+}
+function marca(ok, falhou) {
+  return falhou ? '<span style="color:var(--critical);font-weight:700">✗</span>'
+    : ok ? '<span style="color:var(--good-ink);font-weight:700">✓</span>'
+    : '<span style="color:var(--ink-muted)">○</span>';
+}
+function mostrarClaude(s) {
+  ultimoStatus = s;
+  const c = s.claude || {}, t = tipoInst(s), pc = esc((s.instalacao || {}).computador || 'este computador');
+  const linhas = [];
+  let reparar = false;
+  if (c.mesmo_banco === false) {
+    linhas.push(`<div class="flash err">O Claude está lendo outro banco de mensagens, provavelmente de uma instalação antiga do Lumnia Zap.</div>
+      <span class="st">${t === 'windows-store'
+        ? 'Abra o Lumnia Zap pelo Menu Iniciar e aceite passar o histórico da instalação antiga; depois ' + comoSairDoClaude(t) + ' e abra de novo.'
+        : comoSairDoClaude(t).replace(/^./, m => m.toUpperCase()) + ', clique em <b>Reparar</b> e abra o Claude de novo.'}</span>`);
+    reparar = t === 'mac' || t === 'windows-classica';
+  }
+  if (c.config === 'sem_entrada' || c.config === 'outra_instalacao') {
+    linhas.push(`<div class="flash err">${c.config === 'sem_entrada'
+      ? 'O Claude deste computador está sem o Lumnia Zap na configuração.'
+      : 'A configuração do Claude aponta para outra instalação do Lumnia Zap.'}</div>
+      <span class="st">${comoSairDoClaude(t).replace(/^./, m => m.toUpperCase())} e clique em <b>Reparar</b>. Com o Claude aberto a configuração pode se perder.</span>`);
+    reparar = true;
+  } else if (c.config === 'sem_claude') {
+    linhas.push(`<div>Não achei o Claude Desktop neste computador. Instale de <a href="https://claude.ai/download" target="_blank" rel="noopener">claude.ai/download</a>; no navegador o WhatsApp não aparece.</div>`);
+  }
+  if (c.ultimo_sinal_secs != null) {
+    if (c.mesmo_banco !== false)
+      linhas.unshift(`<div><span style="color:var(--good-ink);font-weight:600">Claude leu ${humanSecs(c.ultimo_sinal_secs)}</span>${c.ferramenta ? ' <span class="st" style="display:inline">(' + esc(c.ferramenta) + ')</span>' : ''}</div>`);
+  } else if (c.mesmo_banco !== false) {
+    linhas.push(`<div>O Claude ainda não leu nada nesta instalação. No Claude, peça <i>"liste minhas conversas do WhatsApp"</i>, ou use <b>Testar com o Claude</b>.</div>`);
+  }
+  linhas.push(`<span class="st">Este computador: ${pc}. O Claude precisa estar aberto neste mesmo computador.</span>`);
+  $('claude-estado').className = '';
+  $('claude-estado').innerHTML = linhas.join('');
+  $('btn-reparar').style.display = reparar ? '' : 'none';
+  $('btn-testar').disabled = !s.connected;
+  mostrarTeste(s.teste, t, pc);
+}
+function mostrarTeste(te, t, pc) {
+  const w = $('claude-teste');
+  if (!te) { w.innerHTML = ''; return; }
+  const parado = !te.achou && !te.outro_banco && te.segundos > 180;
+  const dicas = [
+    t === 'windows-store' ? 'A extensão do Lumnia Zap está instalada no Claude? Baixe em <a href="https://lumnia.dev/zap" target="_blank" rel="noopener">lumnia.dev/zap</a> → Extensão do Claude.' : '',
+    'Você saiu do Claude de verdade depois de instalar? Para isso, ' + comoSairDoClaude(t) + ' e abra de novo.',
+    'Está usando o Claude no navegador? O WhatsApp só aparece no aplicativo Claude Desktop.',
+    'O Claude está aberto em outro computador? Este é o ' + pc + '.',
+    'O servidor do Claude pode estar desatualizado: rode o instalador do Lumnia Zap de novo.',
+  ].filter(Boolean);
+  w.innerHTML = `<div style="margin-top:12px;padding:12px 14px;border:1px solid var(--ring);border-radius:8px">
+    <div style="font-size:13.5px">Mandei <b>"Teste do Lumnia Zap · código ${esc(te.codigo)}"</b> para o seu próprio número (aparece no celular em "Mensagem para mim"). Agora peça no Claude:</div>
+    <div class="actions" style="margin:8px 0"><code style="flex:1;min-width:220px">${esc(te.pedido)}</code>
+      <button class="btn ghost" onclick="copiar(${esc(JSON.stringify(te.pedido))}, this)">Copiar</button></div>
+    <div style="font-size:13.5px;display:flex;gap:18px;flex-wrap:wrap">
+      <span>${marca(te.enviada, !!te.erro)} enviada${te.erro ? ': ' + esc(te.erro) : ''}</span>
+      <span>${marca(te.gravada)} gravada no banco</span>
+      <span>${marca(te.achou, te.outro_banco)} ${te.outro_banco ? 'o Claude achou, mas num banco de outra instalação' : 'o Claude achou'}</span>
+    </div>
+    ${te.achou ? '<div class="flash ok" style="margin-top:8px">Tudo certo: o Claude está lendo o WhatsApp deste computador.</div>' : ''}
+    ${parado ? '<div style="margin-top:10px;font-size:13.5px"><b>Nada ainda? O que mais acontece:</b><ul style="margin:6px 0 0;padding-left:18px">' + dicas.map(d => '<li>' + d + '</li>').join('') + '</ul></div>' : ''}
+  </div>`;
+}
+async function testarClaude(btn) {
+  btn.disabled = true; $('claude-flash').textContent = '';
+  try { const te = await painelPost('/api/panel/teste-claude'); mostrarTeste(te, tipoInst(ultimoStatus), ((ultimoStatus || {}).instalacao || {}).computador || ''); }
+  catch (e) { $('claude-flash').className = 'flash err'; $('claude-flash').textContent = e.message; }
+  btn.disabled = false;
+}
+async function repararClaude(btn) {
+  btn.disabled = true; const f = $('claude-flash');
+  try {
+    await painelPost('/api/panel/claude-reparar');
+    f.className = 'flash ok'; f.textContent = 'Configuração refeita. Agora abra o Claude.';
+  } catch (e) { f.className = 'flash err'; f.textContent = e.message; }
+  btn.disabled = false; refreshStatus();
+}
+
+/* ---------- primeiros passos (claude_ligacao.go) ---------- */
+let onbForcado = false;
+const PEDIDOS = [
+  'Resuma a conversa com a Ana de ontem para cá',
+  'O que eu perdi hoje nos grupos?',
+  'Ache a mensagem em que o Pedro mandou o endereço',
+  'Responda o João dizendo que chego às 19h',
+  'Mande o arquivo Proposta.pdf da minha Mesa para a Carla',
+];
+function mostrarOnboarding(s) {
+  const o = s.onboarding || {}, c = s.claude || {}, t = tipoInst(s), te = s.teste || {};
+  const card = $('onb');
+  if (o.concluido && !onbForcado) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const dt = x => x ? new Date(x).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
+  const ligou = c.ultimo_sinal_secs != null || c.config === 'ok' || t === 'linux';
+  const passos = [];
+  passos.push(btPasso(1, s.connected, 'WhatsApp conectado', s.connected ? '' : 'Escaneie o QR code abaixo com o celular.'));
+  passos.push(btPasso(2, (o.mensagens || 0) > 0, 'Histórico chegando',
+    `${o.mensagens || 0} mensagens em ${o.conversas || 0} conversas${o.mais_antiga ? ', de ' + dt(o.mais_antiga) + ' a ' + dt(o.mais_nova) : ''}. ` +
+    'Nos primeiros minutos, deixe o WhatsApp do celular aberto e com a tela ligada; no iPhone o histórico só anda assim.'));
+  passos.push(btPasso(3, ligou, 'Ligar o Claude',
+    t === 'windows-store'
+      ? 'Baixe a extensão em <a href="https://github.com/lumnia-dev-ia/lumnia-zap/releases/latest/download/lumnia-zap.mcpb">lumnia-zap.mcpb</a> e abra o arquivo com o Claude Desktop (ou arraste para a janela do Claude) e confirme a instalação.'
+      : t === 'linux' ? 'Nesta máquina quem usa o Zap é o Claude Code.' : 'O instalador já fez isso. Se aparecer um aviso vermelho em "Ligação com o Claude", use Reparar.'));
+  passos.push(btPasso(4, c.ultimo_sinal_secs != null, 'Reiniciar o Claude de verdade',
+    t === 'linux' ? '' : comoSairDoClaude(t).replace(/^./, m => m.toUpperCase()) + ' e abra de novo. Só assim ele lê a configuração nova.'));
+  passos.push(btPasso(5, !!te.achou, 'Testar', 'Clique em <b>Testar com o Claude</b>, no cartão "Ligação com o Claude", e siga o pedido que aparecer.'));
+  passos.push(btPasso(6, false, 'O que pedir',
+    PEDIDOS.map(p => `<div class="actions" style="margin:4px 0"><span style="flex:1">${esc(p)}</span><button class="btn ghost" onclick="copiar(${esc(JSON.stringify(p))}, this)">Copiar</button></div>`).join('') +
+    '<div style="margin-top:8px">Mensagens programadas (parabéns de aniversário, lembretes) você cria aqui no painel, em "Enviar ou programar".</div>' +
+    '<div class="st" style="margin-top:6px">O Claude só lê quando você pede; não é robô de resposta. Ele lê e envia pelo seu número, neste computador. Cliente não oficial do WhatsApp pode levar a restrição da conta pelo WhatsApp (termos, seção 13-A).</div>'));
+  $('onb-passos').innerHTML = passos.join('');
+  // Concluído sozinho: teste achado, ou tudo já funcionando (quem atualizou
+  // de uma versão anterior não precisa refazer os passos).
+  const pronto = te.achou || (s.connected && (o.mensagens || 0) > 0 && c.ultimo_sinal_secs != null && c.mesmo_banco !== false);
+  if (pronto && !o.concluido && !onbForcado) painelPost('/api/panel/onboarding', { concluido: true }).catch(() => {});
+}
+function onbConcluir(concluido) {
+  onbForcado = !concluido;
+  painelPost('/api/panel/onboarding', { concluido }).then(refreshStatus).catch(() => {});
+  if (!concluido) setTimeout(() => $('onb').scrollIntoView({ behavior: 'smooth' }), 300);
+  return false;
+}
 
 /* ---------- pronta para rodar sozinha (prontidao.go) ---------- */
 function mostrarProntidao(p) {

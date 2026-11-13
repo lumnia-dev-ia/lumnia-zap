@@ -101,6 +101,53 @@ var beatitudeFerramentasLiberadas = []string{
 	"WebSearch", // pesquisa simples (horario, endereco, telefone)
 }
 
+// Timão pelo conector da conta Claude (13-11). Lista fechada, ferramenta por
+// ferramenta, como o Microsoft 365: ler fragatas, missões e CRM; criar e mover
+// missões e leads, registrar atividade e diário. O que chega a outra pessoa
+// (mensagem, DM, resposta em thread) e o que apaga fica de fora. Liberar aqui
+// não dá acesso a ninguém: só funciona para quem tem o Timão ligado na
+// própria conta Claude.
+var beatitudeFerramentasTimao = []string{
+	"mcp__claude_ai_Tim_o__list_boards",
+	"mcp__claude_ai_Tim_o__portfolio_overview",
+	"mcp__claude_ai_Tim_o__project_status",
+	"mcp__claude_ai_Tim_o__list_my_tasks",
+	"mcp__claude_ai_Tim_o__weekly_agenda",
+	"mcp__claude_ai_Tim_o__pending_by_user",
+	"mcp__claude_ai_Tim_o__create_task",
+	"mcp__claude_ai_Tim_o__move_task",
+	"mcp__claude_ai_Tim_o__complete_task",
+	"mcp__claude_ai_Tim_o__append_board_log",
+	"mcp__claude_ai_Tim_o__create_meeting_summary",
+	"mcp__claude_ai_Tim_o__list_channels",
+	"mcp__claude_ai_Tim_o__list_dm_peers",
+	"mcp__claude_ai_Tim_o__read_channel",
+	"mcp__claude_ai_Tim_o__search_messages",
+	"mcp__claude_ai_Tim_o__crm_pipeline_summary",
+	"mcp__claude_ai_Tim_o__crm_list_leads",
+	"mcp__claude_ai_Tim_o__crm_lead_detail",
+	"mcp__claude_ai_Tim_o__crm_list_proposals",
+	"mcp__claude_ai_Tim_o__crm_proposal_detail",
+	"mcp__claude_ai_Tim_o__crm_create_lead",
+	"mcp__claude_ai_Tim_o__crm_update_lead",
+	"mcp__claude_ai_Tim_o__crm_move_lead_stage",
+	"mcp__claude_ai_Tim_o__crm_create_activity",
+}
+
+// Timão: o que fala com terceiros, apaga ou reconfigura o funil.
+var beatitudeFerramentasTimaoNegadas = []string{
+	"mcp__claude_ai_Tim_o__send_message", "mcp__claude_ai_Tim_o__reply_in_thread",
+	"mcp__claude_ai_Tim_o__start_dm", "mcp__claude_ai_Tim_o__delete_message",
+	"mcp__claude_ai_Tim_o__delete_task", "mcp__claude_ai_Tim_o__crm_delete_lead",
+	"mcp__claude_ai_Tim_o__crm_delete_activity", "mcp__claude_ai_Tim_o__crm_create_pipeline",
+	"mcp__claude_ai_Tim_o__crm_create_stage",
+}
+
+func init() {
+	beatitudeFerramentasLiberadas = append(beatitudeFerramentasLiberadas, beatitudeFerramentasTimao...)
+	beatitudeFerramentasNegadas = append(beatitudeFerramentasNegadas, beatitudeFerramentasTimaoNegadas...)
+}
+
 // Negadas explicitamente, por garantia.
 var beatitudeFerramentasNegadas = []string{
 	"mcp__lumnia-zap__send_message",
@@ -545,6 +592,7 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"Gmail: você pode ler e criar RASCUNHOS (nunca enviar). Quando ela pedir um e-mail, deixe o rascunho no Gmail e diga para quem ficou e o assunto.",
 		"Drive: só leitura, para achar e resumir arquivos.",
 		"Microsoft (quem usa Outlook): as mesmas regras do Google pelo conector Microsoft 365. Ler e-mail e agenda; e-mail só como RASCUNHO (outlook_create_draft ou outlook_create_reply_draft), nunca enviar; evento só na agenda dela e sem convidados (outlook_create_event, outlook_update_event). Use o Google ou o Microsoft conforme o que estiver conectado; se os dois estiverem, a agenda e o e-mail de trabalho costumam ser os do Microsoft.",
+		"Timão (quem tem o conector ligado no Claude): você pode ler fragatas, missões, canais e o CRM, criar, mover e concluir missões, registrar no diário de bordo, criar e atualizar leads, mover lead de fase e registrar atividade. Pedido claro é para fazer: ache a fragata ou o lead pelo nome, faça e conte em uma linha o que fez (quantas missões, em qual fragata). Mandar mensagem, abrir DM ou responder em canal do Timão chega a outra pessoa: não faça; diga em uma linha que isso ela manda pelo próprio Timão. Não apague nada no Timão.",
 		"Aprender com ela: quando ela contar algo durável sobre si ou sobre alguém do círculo, guarde no Beatitude NA HORA, na frase dela, sem interpretar: um fato da vida dela ou alguém novo do círculo -> gravar_perfil; um fato datado sobre uma pessoa -> gravar_fato_pessoa; uma regra fixa (\"com meu pai é ligação, não texto\") -> gravar_regra; uma data que importa -> registrar_marco; algo que ela quer fazer -> registrar_vontade. Depois diga numa linha só \"Guardei: ...\". Isso vai para o Caderno no Drive dela na escrita da madrugada. Não grave saúde clínica, valores, senhas, nem o que é de terceiros (o que outra pessoa disse numa conversa). Pergunta, pedido de tarefa ou desabafo do momento não é para guardar.",
 		"Caderno: se ela pedir para anotar no caderno, completar a nota de alguém ou do Eu (\"anota no meu caderno que...\", \"completa a nota da minha mãe\"), chame ler_roteiro('caderno') e siga. Antes de escrever um rascunho para alguém do círculo, chame ler_caderno com pessoa=<nome> e use o que a nota diz (como ela escreve para essa pessoa, do que a pessoa gosta, datas); o que está no caderno é a verdade dela, não invente além.",
 		"Nunca diga que abriu, começou, autorizou ou fez algo no Chrome ou no navegador: neste passo você não tem navegador, e quem abre o Chrome é a ponte, depois da resposta *abre*. Se ela parecer autorizar uma tarefa de navegador com outras palavras, responda só: \"Para eu abrir o Chrome, responda *abre*.\"",

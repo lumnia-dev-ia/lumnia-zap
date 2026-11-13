@@ -66,3 +66,35 @@ func TestAprovacaoDoNavegador(t *testing.T) {
 		}
 	}
 }
+
+func TestMordomoTimaoSemTerceirosNemApagar(t *testing.T) {
+	liberada := map[string]bool{}
+	for _, f := range beatitudeFerramentasLiberadas {
+		liberada[f] = true
+	}
+	negada := map[string]bool{}
+	for _, f := range beatitudeFerramentasNegadas {
+		negada[f] = true
+	}
+	for _, f := range []string{
+		"mcp__claude_ai_Tim_o__list_boards",
+		"mcp__claude_ai_Tim_o__create_task",
+		"mcp__claude_ai_Tim_o__complete_task",
+		"mcp__claude_ai_Tim_o__crm_create_lead",
+	} {
+		if !liberada[f] {
+			t.Errorf("deveria estar liberada: %s", f)
+		}
+	}
+	for _, f := range []string{
+		"mcp__claude_ai_Tim_o__send_message",
+		"mcp__claude_ai_Tim_o__start_dm",
+		"mcp__claude_ai_Tim_o__reply_in_thread",
+		"mcp__claude_ai_Tim_o__delete_task",
+		"mcp__claude_ai_Tim_o__crm_delete_lead",
+	} {
+		if liberada[f] || !negada[f] {
+			t.Errorf("deveria estar negada: %s", f)
+		}
+	}
+}

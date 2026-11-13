@@ -61,6 +61,16 @@ class TestSinal(unittest.TestCase):
         self.assertEqual(list(inspect.signature(emb).parameters), ["a", "b"])
         self.assertEqual(emb.__doc__, "doc")
 
+    def test_cliente_marcado_pelo_mordomo(self):
+        os.environ["LUMNIA_ZAP_CLIENTE"] = "beatitude"
+        try:
+            self.assertEqual(sinal.cliente(None), "beatitude")
+            c = sinal.sinalizar("x", [], self.db, agora=500.0, enviar=lambda _: None, quem=sinal.cliente(None))
+            self.assertEqual(c["cliente"], "beatitude")
+        finally:
+            del os.environ["LUMNIA_ZAP_CLIENTE"]
+        self.assertEqual(sinal.cliente(None), "")  # sem contexto MCP: vazio, sem erro
+
     def test_codigo_dentro_de_lista_de_mensagens(self):
         resultado = [{"content": "Teste do Lumnia Zap · código 0007"}]
         self.assertEqual(sinal.codigo_no_resultado(resultado), "0007")

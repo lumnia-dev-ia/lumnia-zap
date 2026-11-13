@@ -58,7 +58,7 @@ func main() {
 
 		// Migracao da instalacao classica em andamento (LumniaZap.exe): nao
 		// sobe a ponte enquanto o historico e copiado (migrar.ArquivoPausa).
-		if _, err := os.Stat(migrar.ArquivoPausa(comum.PastaDados())); err == nil {
+		if migrar.EmPausa(comum.PastaDados(), time.Now()) {
 			log.Close()
 			time.Sleep(2 * time.Second)
 			continue

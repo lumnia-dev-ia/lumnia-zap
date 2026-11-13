@@ -5,6 +5,12 @@
 Primeira versão com Mac, Windows (Store e manual) e Linux (nuvem do Beatitude)
 saindo do mesmo código. A Store recebe o pacote 1.1.1.0.
 
+**Segurança**
+- A ponte passa a recusar pedidos que não vêm do painel local nem do servidor
+  MCP: um site aberto no navegador conseguia mandar um formulário para
+  `localhost:8080/api/send` e enviar mensagens pelo WhatsApp da pessoa (CSRF),
+  e um domínio apontado para 127.0.0.1 conseguia ler o painel (DNS rebinding).
+
 **Ligação com o Claude**
 - Painel: cartão "Ligação com o Claude" (quando o Claude leu, e se leu o banco
   desta instalação), botão "Testar com o Claude" (código para o próprio

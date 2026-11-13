@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,11 @@ func pergunta(titulo, msg string) bool {
 func oferecerMigracao() {
 	sis := comum.SistemaWindows{}
 	p := comum.PastasMigracao()
-	alheia := comum.Vivo() && comum.StatusTipo() != "windows-store"
+	// "alheia": a 8080 responde e não é a ponte da Store. Só vale com a
+	// pasta da instalação antiga no disco: sem isso, um status lento (tipo
+	// vazio) faria esta caixa aparecer para quem nunca teve a versão antiga.
+	_, errClassica := os.Stat(p.Classica)
+	alheia := errClassica == nil && comum.Vivo() && comum.StatusTipo() != "windows-store"
 	if !migrar.Pendente(sis, p) && !alheia {
 		return
 	}

@@ -239,11 +239,11 @@ func instalar() error {
 		return fmt.Errorf("não consegui preparar o Python do servidor: %v", err)
 	}
 
-	// Fechar o Claude ANTES de gravar a configuração (doc 12).
-	if claudeDetectado {
-		if err := garantirClaudeFechado(); err != nil {
-			return err
-		}
+	// Fechar o Claude ANTES de gravar a configuração (doc 12). Sem depender
+	// de claudeDetectado: a config é gravada de qualquer jeito, e a checagem
+	// aqui é pelo processo, não pela pasta de instalação.
+	if err := garantirClaudeFechado(); err != nil {
+		return err
 	}
 
 	etapa("Conectando ao Claude Desktop…")

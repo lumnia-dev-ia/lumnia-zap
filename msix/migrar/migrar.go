@@ -56,6 +56,24 @@ func (p Pastas) marcador() string { return filepath.Join(p.LocalState, "migrado.
 // ArquivoPausa: enquanto existir, o servico.exe não sobe a ponte da Store.
 func ArquivoPausa(localState string) string { return filepath.Join(localState, "pausa-migracao") }
 
+// PausaMaxima: uma migração leva segundos. Pausa mais velha que isto é resto
+// de uma migração interrompida (queda de energia, processo morto) e não pode
+// impedir a ponte da Store de subir para sempre.
+const PausaMaxima = 15 * time.Minute
+
+// EmPausa diz se há migração em andamento; pausa vencida é removida.
+func EmPausa(localState string, agora time.Time) bool {
+	st, err := os.Stat(ArquivoPausa(localState))
+	if err != nil {
+		return false
+	}
+	if agora.Sub(st.ModTime()) > PausaMaxima {
+		_ = os.Remove(ArquivoPausa(localState))
+		return false
+	}
+	return true
+}
+
 // Pendente diz se há instalação clássica a migrar: banco clássico no disco
 // (ou a Tarefa Agendada dela) e nenhuma migração feita antes.
 func Pendente(s Sistema, p Pastas) bool {

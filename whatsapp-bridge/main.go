@@ -923,7 +923,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		}
 		fmt.Printf("Starting REST API server on %s...\n", addr)
 		go func(l net.Listener) {
-			if err := http.Serve(l, nil); err != nil {
+			if err := http.Serve(l, guardaLocal(http.DefaultServeMux)); err != nil {
 				fmt.Printf("REST API server error: %v\n", err)
 			}
 		}(ln)

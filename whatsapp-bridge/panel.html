@@ -436,7 +436,7 @@ function mostrarClaude(s) {
   }
   if (c.ultimo_sinal_secs != null) {
     if (c.mesmo_banco !== false)
-      linhas.unshift(`<div><span style="color:var(--good-ink);font-weight:600">Claude leu ${humanSecs(c.ultimo_sinal_secs)}</span>${c.ferramenta ? ' <span class="st" style="display:inline">(' + esc(c.ferramenta) + ')</span>' : ''}</div>`);
+      linhas.unshift(`<div><span style="color:var(--good-ink);font-weight:600">Claude leu ${humanSecs(c.ultimo_sinal_secs)}</span>${c.ferramenta ? ' <span class="st" style="display:inline">(' + esc(c.ferramenta) + (c.cliente ? ', por ' + esc(c.cliente) : '') + ')</span>' : ''}</div>`);
   } else if (c.mesmo_banco !== false) {
     linhas.push(`<div>O Claude ainda não leu nada nesta instalação. No Claude, peça <i>"liste minhas conversas do WhatsApp"</i>, ou use <b>Testar com o Claude</b>.</div>`);
   }
@@ -473,7 +473,7 @@ function mostrarTeste(te, t, pc) {
 }
 async function testarClaude(btn) {
   btn.disabled = true; $('claude-flash').textContent = '';
-  try { const te = await painelPost('/api/panel/teste-claude'); mostrarTeste(te, tipoInst(ultimoStatus), ((ultimoStatus || {}).instalacao || {}).computador || ''); }
+  try { const te = await painelPost('/api/panel/teste-claude'); mostrarTeste(te, tipoInst(ultimoStatus), esc(((ultimoStatus || {}).instalacao || {}).computador || 'este computador')); }
   catch (e) { $('claude-flash').className = 'flash err'; $('claude-flash').textContent = e.message; }
   btn.disabled = false;
 }
@@ -500,7 +500,9 @@ function mostrarOnboarding(s) {
   const card = $('onb');
   if (o.concluido && !onbForcado) { card.style.display = 'none'; return; }
   card.style.display = '';
-  const dt = x => x ? new Date(x).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—';
+  // O banco guarda "2026-11-13 10:00:00-03:00" (com espaço): o Safari só
+  // entende com "T".
+  const dt = x => { const d = x ? new Date(String(x).replace(' ', 'T')) : null; return d && !isNaN(d) ? d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'; };
   const ligou = c.ultimo_sinal_secs != null || c.config === 'ok' || t === 'linux';
   const passos = [];
   passos.push(btPasso(1, s.connected, 'WhatsApp conectado', s.connected ? '' : 'Escaneie o QR code abaixo com o celular.'));

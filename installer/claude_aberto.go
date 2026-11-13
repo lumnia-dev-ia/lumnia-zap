@@ -29,12 +29,16 @@ var claudeAbertoFn = func() bool {
 	return exec.Command("/usr/bin/pgrep", "-x", "Claude").Run() == nil
 }
 
+// SIGTERM no processo principal, não AppleScript: mandar um Apple Event a
+// outro app (tell application "Claude" to quit) exige a permissão de
+// Automação do macOS, e num app notarizado sem a entitlement de apple-events
+// o pedido é negado em silêncio. O Electron trata o SIGTERM como um quit
+// normal (salva o que precisa e sai).
 var fecharClaudeFn = func() error {
-	_, err := osa(`tell application "Claude" to quit`)
-	return err
+	return exec.Command("/usr/bin/pkill", "-TERM", "-x", "Claude").Run()
 }
 
-var esperaFecharClaude = 30 * time.Second
+var esperaFecharClaude = 15 * time.Second
 
 // garantirClaudeFechado: se o Claude está aberto, explica e pede para fechar.
 // "Fechar o Claude para mim" manda o quit (o Claude pode pedir confirmação se
@@ -52,17 +56,36 @@ func garantirClaudeFechado() error {
 		return fmt.Errorf("instalação cancelada: o Claude precisa estar fechado. Feche o Claude (Cmd+Q) e rode o instalador de novo")
 	}
 	if err := fecharClaudeFn(); err != nil {
-		anotar("Pedido de quit ao Claude falhou: %v", err)
+		anotar("Pedido para o Claude fechar falhou: %v", err)
 	}
+	if esperarClaudeFechar() {
+		return nil
+	}
+	// Não fechou sozinho (pode estar perguntando algo): a pessoa fecha à mão
+	// e continua, em vez de perder a instalação inteira.
+	for tentativa := 0; tentativa < 3; tentativa++ {
+		if !perguntarBotoes("O Claude ainda está aberto",
+			"Feche o Claude com Cmd+Q (confirme se ele perguntar alguma coisa) e clique em Continuar.",
+			"Cancelar", "Continuar") {
+			break
+		}
+		if esperarClaudeFechar() {
+			return nil
+		}
+	}
+	return fmt.Errorf("o Claude não fechou. Feche o Claude com Cmd+Q (confirme se ele perguntar) e rode o instalador de novo")
+}
+
+func esperarClaudeFechar() bool {
 	limite := time.Now().Add(esperaFecharClaude)
 	for time.Now().Before(limite) {
 		if !claudeAbertoFn() {
 			anotar("Claude fechado")
-			return nil
+			return true
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("o Claude não fechou. Feche o Claude com Cmd+Q (confirme se ele perguntar) e rode o instalador de novo")
+	return false
 }
 
 // gravarJSONAtomico grava num temporário ao lado e troca com rename: o

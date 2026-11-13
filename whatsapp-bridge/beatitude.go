@@ -841,6 +841,10 @@ func beatitudeMCPConfig() (string, error) {
 		"lumnia-zap": map[string]interface{}{
 			"command": uv,
 			"args":    []string{"--directory", servidor, "run", "main.py"},
+			// O sinal do servidor MCP diz que quem leu foi o mordomo, não o
+			// Claude Desktop: senão o cartão "Ligação com o Claude" ficaria
+			// verde só porque o Beatitude trabalhou (claude_ligacao.go).
+			"env": map[string]string{"LUMNIA_ZAP_CLIENTE": "beatitude"},
 		},
 	}
 	// Modo rapido (--strict-mcp-config): o Claude ignora os outros MCPs da

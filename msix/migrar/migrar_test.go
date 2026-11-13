@@ -132,3 +132,20 @@ func TestPendenteSoComClassica(t *testing.T) {
 		t.Fatal("só a tarefa já indica clássica")
 	}
 }
+
+func TestPausaVencidaNaoTravaAPonte(t *testing.T) {
+	ls := t.TempDir()
+	if EmPausa(ls, time.Now()) {
+		t.Fatal("sem arquivo, sem pausa")
+	}
+	_ = os.WriteFile(ArquivoPausa(ls), []byte("x"), 0o644)
+	if !EmPausa(ls, time.Now()) {
+		t.Fatal("pausa recente vale")
+	}
+	if EmPausa(ls, time.Now().Add(PausaMaxima+time.Minute)) {
+		t.Fatal("pausa de migração interrompida não pode travar a ponte para sempre")
+	}
+	if _, err := os.Stat(ArquivoPausa(ls)); !os.IsNotExist(err) {
+		t.Fatal("pausa vencida deveria ser removida")
+	}
+}

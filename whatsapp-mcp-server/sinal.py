@@ -12,6 +12,7 @@ Claude passa sempre); ponte desligada = sinal ignorado.
 """
 import functools
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -74,7 +75,21 @@ def _enviar(corpo):
         pass  # ponte fora do ar ou antiga (404): o sinal e opcional
 
 
-def sinalizar(ferramenta, resultado, caminho_db, agora=None, enviar=None):
+def cliente(mcp=None):
+    """Quem esta usando o servidor: LUMNIA_ZAP_CLIENTE (o mordomo do Beatitude
+    define "beatitude") ou o nome que o cliente MCP deu no initialize
+    (claude-ai, codex...). Vazio se nao der para saber."""
+    marcado = os.environ.get("LUMNIA_ZAP_CLIENTE", "").strip()
+    if marcado:
+        return marcado[:40]
+    try:
+        info = mcp.get_context().session.client_params.clientInfo
+        return (info.name or "")[:40]
+    except Exception:
+        return ""
+
+
+def sinalizar(ferramenta, resultado, caminho_db, agora=None, enviar=None, quem=""):
     """Decide e dispara o sinal em segundo plano. Devolve o corpo enviado (ou
     None), para os testes."""
     global _ultimo
@@ -85,6 +100,8 @@ def sinalizar(ferramenta, resultado, caminho_db, agora=None, enviar=None):
             return None
         _ultimo = agora
     corpo = {"db_id": db_id(caminho_db), "ferramenta": ferramenta, "versao_mcp": VERSAO_MCP}
+    if quem:
+        corpo["cliente"] = quem
     if codigo:
         corpo["teste_codigo"] = codigo
     alvo = enviar or _enviar
@@ -92,13 +109,13 @@ def sinalizar(ferramenta, resultado, caminho_db, agora=None, enviar=None):
     return corpo
 
 
-def com_sinal(fn, caminho_db):
+def com_sinal(fn, caminho_db, mcp=None):
     """Embrulha uma ferramenta: o resultado volta intacto; o sinal vai depois."""
     @functools.wraps(fn)
     def embrulho(*args, **kwargs):
         resultado = fn(*args, **kwargs)
         try:
-            sinalizar(fn.__name__, resultado, caminho_db)
+            sinalizar(fn.__name__, resultado, caminho_db, quem=cliente(mcp))
         except Exception as e:  # nunca derruba a ferramenta
             _log("sinal falhou:", e)
         return resultado
@@ -114,6 +131,6 @@ def instalar(mcp, caminho_db):
         decorador = original(*a, **k)
 
         def aplicar(fn):
-            return decorador(com_sinal(fn, caminho_db))
+            return decorador(com_sinal(fn, caminho_db, mcp))
         return aplicar
     mcp.tool = tool

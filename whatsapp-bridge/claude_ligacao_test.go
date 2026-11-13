@@ -170,3 +170,39 @@ func TestTesteExpiraEOnboarding(t *testing.T) {
 		t.Fatalf("código: %q", c)
 	}
 }
+
+func TestSinalDoMordomoNaoContaComoClaude(t *testing.T) {
+	antigo := panel.store
+	panel.store = storeDeTeste(t)
+	defer func() { panel.store = antigo; ligacao.sinal = sinalClaude{} }()
+	_ = panelMetaCriar(panel.store.db)
+	ligacao.sinal = sinalClaude{}
+	post := func(corpo string) {
+		r := httptest.NewRequest(http.MethodPost, "/api/panel/claude-sinal", strings.NewReader(corpo))
+		r.Header.Set("Content-Type", "application/json")
+		claudeSinalHandler(httptest.NewRecorder(), r)
+	}
+	post(`{"ferramenta":"list_messages","cliente":"beatitude"}`)
+	resp := map[string]interface{}{}
+	ligacaoStatus(resp)
+	if _, leu := resp["claude"].(map[string]interface{})["ultimo_sinal_secs"]; leu {
+		t.Fatal("leitura do mordomo do Beatitude não pode acender o cartão do Claude")
+	}
+	post(`{"ferramenta":"list_chats","cliente":"claude-ai"}`)
+	resp = map[string]interface{}{}
+	ligacaoStatus(resp)
+	if resp["claude"].(map[string]interface{})["cliente"] != "claude-ai" {
+		t.Fatalf("claude: %v", resp["claude"])
+	}
+}
+
+func TestOnboardingConcluidoNaoContaOBanco(t *testing.T) {
+	antigo := panel.store
+	panel.store = storeDeTeste(t)
+	defer func() { panel.store = antigo; ligacaoCacheZerar() }()
+	_ = panelMetaCriar(panel.store.db)
+	panelMetaSet("onboarding_concluido", "1")
+	if o := onboardingResumo(); o["concluido"] != true || o["mensagens"] != nil {
+		t.Fatalf("onboarding concluído: %v", o)
+	}
+}

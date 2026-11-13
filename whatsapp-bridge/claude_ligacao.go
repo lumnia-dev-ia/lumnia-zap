@@ -131,6 +131,7 @@ type sinalClaude struct {
 	DBID       string
 	Ferramenta string
 	VersaoMCP  string
+	Cliente    string // nome do cliente MCP (claude-ai, codex…), quando o servidor sabe
 }
 
 var ligacao struct {
@@ -162,12 +163,19 @@ func claudeSinalHandler(w http.ResponseWriter, r *http.Request) {
 		Ferramenta  string `json:"ferramenta"`
 		VersaoMCP   string `json:"versao_mcp"`
 		TesteCodigo string `json:"teste_codigo"`
+		Cliente     string `json:"cliente"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&c); err != nil {
 		http.Error(w, "json inválido", http.StatusBadRequest)
 		return
 	}
-	s := sinalClaude{Em: time.Now(), DBID: limitar(c.DBID, 64), Ferramenta: limitar(c.Ferramenta, 64), VersaoMCP: limitar(c.VersaoMCP, 32)}
+	// O mordomo do Beatitude usa o mesmo servidor MCP pelo Claude Code: a
+	// leitura dele não prova nada sobre o Claude Desktop e fica fora do cartão.
+	if strings.EqualFold(strings.TrimSpace(c.Cliente), "beatitude") {
+		writeJSON(w, map[string]bool{"ok": true})
+		return
+	}
+	s := sinalClaude{Em: time.Now(), DBID: limitar(c.DBID, 64), Ferramenta: limitar(c.Ferramenta, 64), VersaoMCP: limitar(c.VersaoMCP, 32), Cliente: limitar(c.Cliente, 40)}
 	meu := panelMetaGet("db_id")
 	ligacao.mu.Lock()
 	ligacao.sinal = s
@@ -177,7 +185,7 @@ func claudeSinalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ligacao.mu.Unlock()
 	// sobrevive a reinício da ponte
-	panelMetaSet("claude_sinal", s.Em.UTC().Format(time.RFC3339)+"|"+s.DBID+"|"+s.Ferramenta+"|"+s.VersaoMCP)
+	panelMetaSet("claude_sinal", s.Em.UTC().Format(time.RFC3339)+"|"+s.DBID+"|"+s.Ferramenta+"|"+s.VersaoMCP+"|"+s.Cliente)
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -196,10 +204,14 @@ func ultimoSinal() sinalClaude {
 	if !s.Em.IsZero() {
 		return s
 	}
-	p := strings.SplitN(panelMetaGet("claude_sinal"), "|", 4)
-	if len(p) == 4 {
+	p := strings.SplitN(panelMetaGet("claude_sinal"), "|", 5)
+	if len(p) >= 4 {
 		if t, err := time.Parse(time.RFC3339, p[0]); err == nil {
-			return sinalClaude{Em: t, DBID: p[1], Ferramenta: p[2], VersaoMCP: p[3]}
+			s := sinalClaude{Em: t, DBID: p[1], Ferramenta: p[2], VersaoMCP: p[3]}
+			if len(p) == 5 {
+				s.Cliente = p[4]
+			}
+			return s
 		}
 	}
 	return sinalClaude{}
@@ -220,9 +232,10 @@ func pastasConfigClaudePonte() []string {
 		if outras, _ := filepath.Glob(filepath.Join(suporte, "Claude?*")); len(outras) > 0 {
 			pastas = append(pastas, outras...)
 		}
-		if sand, _ := filepath.Glob(filepath.Join(home, "Library", "Containers", "*", "Data", "Library", "Application Support", "Claude*")); len(sand) > 0 {
-			pastas = append(pastas, sand...)
-		}
+		// ~/Library/Containers fica de fora de propósito: a ponte roda em
+		// segundo plano e varrer as pastas de outros apps a cada consulta pode
+		// disparar o aviso de privacidade do macOS. O instalador, que roda com
+		// a pessoa olhando, continua cobrindo esse caso.
 	case "windows-classica":
 		local := os.Getenv("LOCALAPPDATA")
 		if local == "" {
@@ -428,6 +441,7 @@ func claudeRepararHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	ligacaoCacheZerar()
 	writeJSON(w, map[string]interface{}{"ok": true, "pastas": feitas})
 }
 
@@ -503,7 +517,11 @@ func testeResumo() map[string]interface{} {
 // ---------------------------------------------------------------- primeiros passos
 
 func onboardingResumo() map[string]interface{} {
-	out := map[string]interface{}{"concluido": panelMetaGet("onboarding_concluido") == "1"}
+	concluido := panelMetaGet("onboarding_concluido") == "1"
+	out := map[string]interface{}{"concluido": concluido}
+	if concluido {
+		return out // sem contar o banco inteiro para um cartão que nem aparece
+	}
 	if panel.store != nil {
 		var msgs, chats int
 		var antiga, nova sql.NullString
@@ -533,6 +551,7 @@ func onboardingHandler(w http.ResponseWriter, r *http.Request) {
 		v = "1"
 	}
 	panelMetaSet("onboarding_concluido", v)
+	ligacaoCacheZerar()
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
@@ -562,15 +581,54 @@ func ligacaoStatus(resp map[string]interface{}) {
 		claude["ultimo_sinal_secs"] = int(time.Since(s.Em).Seconds())
 		claude["ferramenta"] = s.Ferramenta
 		claude["versao_mcp"] = s.VersaoMCP
+		claude["cliente"] = s.Cliente
 		claude["mesmo_banco"] = s.DBID == "" || meu == "" || s.DBID == meu
 	}
-	estado, _ := estadoConfigClaude(pastasConfigClaudePonte(), servidorDestaInstalacao())
-	claude["config"] = estado
+	claude["config"] = estadoConfigEmCache()
 	resp["claude"] = claude
 	if t := testeResumo(); t != nil {
 		resp["teste"] = t
 	}
-	resp["onboarding"] = onboardingResumo()
+	resp["onboarding"] = onboardingEmCache()
+}
+
+// O painel consulta o status a cada 5 s. Ler os arquivos de config do Claude
+// e contar as mensagens do banco a cada consulta é desperdício: valem por
+// 30 s (Reparar e a conclusão dos primeiros passos zeram o cache).
+var ligacaoCache struct {
+	mu         sync.Mutex
+	configEm   time.Time
+	config     string
+	onboardEm  time.Time
+	onboarding map[string]interface{}
+}
+
+const ligacaoCacheValidade = 30 * time.Second
+
+func estadoConfigEmCache() string {
+	ligacaoCache.mu.Lock()
+	defer ligacaoCache.mu.Unlock()
+	if ligacaoCache.config == "" || time.Since(ligacaoCache.configEm) > ligacaoCacheValidade {
+		ligacaoCache.config, _ = estadoConfigClaude(pastasConfigClaudePonte(), servidorDestaInstalacao())
+		ligacaoCache.configEm = time.Now()
+	}
+	return ligacaoCache.config
+}
+
+func onboardingEmCache() map[string]interface{} {
+	ligacaoCache.mu.Lock()
+	defer ligacaoCache.mu.Unlock()
+	if ligacaoCache.onboarding == nil || time.Since(ligacaoCache.onboardEm) > ligacaoCacheValidade {
+		ligacaoCache.onboarding = onboardingResumo()
+		ligacaoCache.onboardEm = time.Now()
+	}
+	return ligacaoCache.onboarding
+}
+
+func ligacaoCacheZerar() {
+	ligacaoCache.mu.Lock()
+	ligacaoCache.config, ligacaoCache.onboarding = "", nil
+	ligacaoCache.mu.Unlock()
 }
 
 func registrarRotasLigacao(h func(func(http.ResponseWriter, *http.Request)) http.HandlerFunc) {

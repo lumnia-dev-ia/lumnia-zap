@@ -75,11 +75,8 @@ func beatitudeTipoDoDocumento(mime, nome string) string {
 // beatitudeAvisoLendo: a linha de "estou lendo" para o lote todo.
 func beatitudeAvisoLendo(tipos []string) string {
 	if len(tipos) == 1 {
-		switch tipos[0] {
-		case "pdf":
+		if tipos[0] == "pdf" {
 			return "lendo o PDF…"
-		case "outro":
-			return "lendo o arquivo…"
 		}
 		return "lendo a imagem…"
 	}
@@ -189,7 +186,9 @@ var beatitudeLeitorNegadas = []string{
 	"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep",
 	"WebFetch", "WebSearch", "Task", "Agent",
 	"Read(~/.ssh/**)", "Read(~/.claude/**)", "Read(~/.aws/**)", "Read(~/.config/**)", "Read(~/.gnupg/**)",
-	"Read(~/Library/Keychains/**)", "Read(~/Library/Application Support/Claude/**)",
+	"Read(~/Library/Keychains/**)",
+	// Sem regra com espaço no caminho: --disallowedTools separa por vírgula
+	// OU espaço, e uma regra partida ao meio invalidaria a lista.
 }
 
 // beatitudeLerMidia baixa a mídia do pedido, copia para uma pasta só dela e
@@ -263,7 +262,10 @@ func beatitudeLerMidia(claude, grupo string, p beatitudePedido) (beatitudeLeitur
 func beatitudeMidiasDoLote(pedidos []beatitudePedido) []string {
 	var tipos []string
 	for _, p := range pedidos {
-		if p.Midia != "" && len(tipos) < beatitudeMidiaMaxLote {
+		// "outro" (Word, planilha…) não é lido: fica fora do aviso de
+		// "lendo…" para o grupo não ver "lendo o arquivo" seguido de "não
+		// consegui ler".
+		if p.Midia != "" && p.Midia != "outro" && len(tipos) < beatitudeMidiaMaxLote {
 			tipos = append(tipos, p.Midia)
 		}
 	}

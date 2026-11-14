@@ -424,6 +424,7 @@ func claudeRepararHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if claudeAbertoPonte() {
+		zeladorPausar("claude", 30*time.Minute) // a pessoa vai fechar o Claude: o zelador não reabre no meio
 		sair := "Feche o Claude com Cmd+Q"
 		if runtime.GOOS == "windows" {
 			sair = "Saia do Claude pela bandeja (botão direito no ícone perto do relógio → Sair)"

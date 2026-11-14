@@ -3,7 +3,10 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSepararPix(t *testing.T) {
 	codigo := "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Azul Linhas6009Sao Paulo62070503***6304ABCD"
@@ -19,5 +22,20 @@ func TestSepararPix(t *testing.T) {
 	}
 	if v, pix := beatitudeSepararPix("x <pix>isto não é um pix</pix>"); pix != "" || v != "x" {
 		t.Errorf("bloco invalido devia ser descartado: %q %q", v, pix)
+	}
+}
+
+// Com o MacBook e o Mac mini na mesma conta, "o que roda em macOS" escolhia
+// qualquer um dos dois (12-11). A regra tem de mandar usar a marca do proprio
+// computador e nunca outro Chrome do mesmo sistema.
+func TestRegraChromeDesteComputador(t *testing.T) {
+	r := beatitudeRegraChrome()
+	for _, quer := range []string{"onThisComputer", "isLocal", "Nunca use o navegador de outro computador", "exatamente um"} {
+		if !strings.Contains(r, quer) {
+			t.Errorf("regra do Chrome sem %q: %s", quer, r)
+		}
+	}
+	if strings.Contains(r, "selecione o que roda em") {
+		t.Errorf("regra antiga (escolher pelo sistema) voltou: %s", r)
 	}
 }

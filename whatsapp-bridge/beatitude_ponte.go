@@ -68,6 +68,7 @@ var ponte struct {
 	preparando    map[string]time.Time // acao_id -> quando tentou
 	acordar       chan struct{}
 	iniciada      bool
+	enderecoTela  string // "Ver a máquina": o endereço da tela salvo no app (vem no sinal de vida)
 }
 
 // ---------------------------------------------------------------- ciclo de vida
@@ -144,11 +145,17 @@ func ponteRodada() {
 	if e := prontidaoEstado(); e != nil {
 		sinal["estado"] = e
 	}
-	if _, err := ponteChamar("/api/ponte/sinal-de-vida", sinal, nil); err != nil {
+	var resp struct {
+		EnderecoTela *string `json:"endereco_tela"` // 1.1.2; o servidor ainda pode não mandar
+	}
+	if _, err := ponteChamar("/api/ponte/sinal-de-vida", sinal, &resp); err != nil {
 		ponteErro(err)
 		return
 	}
 	ponte.mu.Lock()
+	if resp.EnderecoTela != nil {
+		ponte.enderecoTela = ponteEnderecoSeguro(*resp.EnderecoTela)
+	}
 	ponte.vistoEm = time.Now()
 	precisaRetrato := time.Since(ponte.ultimoRetrato) > ponteRetratoCada
 	ponte.mu.Unlock()
@@ -401,6 +408,8 @@ func ponteMensagensDoGrupo() {
 		Data  string  `json:"data"`
 		Brief *string `json:"brief"`
 		Fecho *string `json:"fecho"`
+		// respostas do bastão (devolver_ao_grupo), beatitude_bastao.go
+		Bastoes []ponteBastaoResposta `json:"bastoes"`
 	}
 	if _, err := ponteChamar("/api/ponte/mensagens-do-grupo", map[string]interface{}{}, &r); err != nil {
 		ponteErro(err)
@@ -420,6 +429,7 @@ func ponteMensagensDoGrupo() {
 			ponteErro(err)
 		}
 	}
+	ponteBastoesDevolvidos(r.Bastoes)
 }
 
 // ---------------------------------------------------------------- preparar respostas
@@ -806,4 +816,20 @@ func ponteDesparearHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]interface{}{"ok": true})
+}
+
+// ponteEnderecoTela: o link "Ver a máquina" (beatitude_preciso.go).
+func ponteEnderecoTela() string {
+	ponte.mu.Lock()
+	defer ponte.mu.Unlock()
+	return ponte.enderecoTela
+}
+
+// ponteEnderecoSeguro aceita só https (é um link que vai ao grupo).
+func ponteEnderecoSeguro(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "https://") || strings.ContainsAny(s, " \n\r\t") || len(s) > 300 {
+		return ""
+	}
+	return s
 }

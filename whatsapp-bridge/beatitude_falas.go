@@ -178,13 +178,13 @@ func falasEnviar(lista []falaGrupo, backfill bool) error {
 // espelhar) ou um comando que o app ja conhece por outro caminho.
 func falaEhConversa(texto string) bool {
 	t := strings.TrimSpace(texto)
-	if t == "" || strings.HasPrefix(t, beatitudeMarca) || strings.HasPrefix(t, "◆") {
+	if t == "" || strings.HasPrefix(t, beatitudeMarca) || strings.HasPrefix(t, "◆") || beatitudeEhMensagemDoBastao(t) {
 		return false
 	}
 	if falaEhRuido(t) {
 		return false
 	}
-	if beatitudeEhAprovacaoNavegador(t) || beatitudeEhComando(t) {
+	if beatitudeEhAprovacaoNavegador(t) || beatitudeEhComando(t) || beatitudeContinuaRe.MatchString(t) || beatitudeBastoesRe.MatchString(t) {
 		return false
 	}
 	return true

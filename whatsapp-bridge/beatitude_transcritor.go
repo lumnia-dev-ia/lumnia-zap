@@ -11,10 +11,14 @@ package main
 // volta por stdout, um JSON por linha. Sem porta, sem socket: so os pipes do
 // processo filho. Quando a ponte morre, o stdin fecha e o Python sai sozinho.
 //
-// faster-whisper em CPU, modelo `small` int8, como antes: funciona igual no
-// Mac e no Linux da nuvem. Se o residente falhar (uv ausente, modelo nao
-// baixado, processo morto), beatitudeTranscrever cai no caminho avulso de
-// antes, que continua existindo em beatitude_extras.go.
+// Motor (14-11): no Mac com chip Apple, o residente usa o mlx-whisper com o
+// large-v3-turbo, que roda na GPU do chip e erra bem menos em portugues que o
+// small (caso de 14-11: "Elevren Labs"). Fora disso (Linux da nuvem, Mac
+// Intel, Windows) segue o faster-whisper `small` int8 em CPU. LUMNIA_ZAP_VOZ=
+// small forca o motor antigo. Se o residente falhar (uv ausente, modelo nao
+// baixado, processo morto, prazo estourado), beatitudeTranscrever cai no
+// caminho avulso de sempre (faster-whisper small), em beatitude_extras.go:
+// o grupo nunca fica sem transcricao.
 
 import (
 	"bufio"
@@ -24,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +36,97 @@ import (
 
 const (
 	beatitudeWhisperModelo    = "small"
-	beatitudeTranscritorSubir = 6 * time.Minute // primeira vez baixa o modelo (~500 MB)
+	beatitudeTranscritorSubir = 12 * time.Minute // primeira vez baixa o modelo (~500 MB no small, ~1,6 GB no turbo)
 	beatitudeTranscritorPrazo = 3 * time.Minute
+	beatitudeMLXRepo          = "mlx-community/whisper-large-v3-turbo"
 )
+
+// beatitudeMotorVoz descreve um motor do residente: o script, os pacotes que
+// o uv instala, o modelo, o prazo por audio e quanto um pedido espera um
+// residente que ainda esta subindo antes de cair no avulso.
+type beatitudeMotorVoz struct {
+	Nome         string // "mlx" | "faster-whisper"
+	Rotulo       string // o que o painel e o mordomo mostram
+	Modelo       string
+	Pacotes      []string
+	Script       string
+	Prazo        time.Duration
+	EsperaSubida time.Duration
+}
+
+// beatitudeMotorTranscricao escolhe o motor desta maquina. Variaveis para o
+// teste trocar o sistema.
+var beatitudeVozGOOS, beatitudeVozGOARCH = runtime.GOOS, runtime.GOARCH
+
+func beatitudeMotorTranscricao() beatitudeMotorVoz {
+	forcar := strings.ToLower(strings.TrimSpace(os.Getenv("LUMNIA_ZAP_VOZ")))
+	if beatitudeVozGOOS == "darwin" && beatitudeVozGOARCH == "arm64" && forcar != "small" {
+		return beatitudeMotorVoz{
+			Nome:    "mlx",
+			Rotulo:  "large-v3-turbo no chip do Mac",
+			Modelo:  beatitudeMLXRepo,
+			Pacotes: []string{"mlx-whisper", "av", "numpy"},
+			Script:  beatitudeTranscritorResidenteMLX,
+			// o turbo no MLX faz um audio de 1 min em poucos segundos; se
+			// passar disso, algo travou e o avulso (small) assume
+			Prazo: 45 * time.Second,
+			// enquanto o turbo baixa (1,6 GB na primeira vez) o audio nao
+			// espera: vai pelo avulso
+			EsperaSubida: 3 * time.Second,
+		}
+	}
+	return beatitudeMotorVoz{
+		Nome:         "faster-whisper",
+		Rotulo:       beatitudeWhisperModelo,
+		Modelo:       beatitudeWhisperModelo,
+		Pacotes:      []string{"faster-whisper"},
+		Script:       beatitudeTranscritorResidente,
+		Prazo:        beatitudeTranscritorPrazo,
+		EsperaSubida: 6 * time.Minute,
+	}
+}
+
+// Residente MLX: mesmo protocolo do faster-whisper (um JSON por linha). O
+// audio do WhatsApp (ogg/opus) e decodificado pelo PyAV para 16 kHz mono, para
+// nao depender do ffmpeg instalado no Mac. O modelo carrega uma vez (o
+// mlx_whisper guarda o modelo carregado entre chamadas) e fica no HF_HOME da
+// pasta do Zap.
+const beatitudeTranscritorResidenteMLX = `import sys, json
+import numpy as np
+import av
+import mlx_whisper
+REPO = sys.argv[2]
+def carregar(arquivo):
+    c = av.open(arquivo)
+    r = av.AudioResampler(format="s16", layout="mono", rate=16000)
+    partes = []
+    for f in c.decode(audio=0):
+        for g in r.resample(f):
+            partes.append(g.to_ndarray().reshape(-1))
+    for g in r.resample(None):
+        partes.append(g.to_ndarray().reshape(-1))
+    c.close()
+    if not partes:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(partes).astype(np.float32) / 32768.0
+mlx_whisper.transcribe(np.zeros(16000, dtype=np.float32), path_or_hf_repo=REPO, language="pt")
+print(json.dumps({"pronto": True}), flush=True)
+for linha in sys.stdin:
+    linha = linha.strip()
+    if not linha:
+        continue
+    try:
+        req = json.loads(linha)
+        audio = carregar(req["arquivo"])
+        if audio.size < 1600:
+            print(json.dumps({"texto": ""}), flush=True)
+            continue
+        out = mlx_whisper.transcribe(audio, path_or_hf_repo=REPO, language="pt",
+            initial_prompt=req.get("dica") or None, condition_on_previous_text=False)
+        print(json.dumps({"texto": (out.get("text") or "").strip()}), flush=True)
+    except Exception as e:
+        print(json.dumps({"erro": str(e)[:300]}), flush=True)
+`
 
 const beatitudeTranscritorResidente = `import sys, json
 from faster_whisper import WhisperModel
@@ -55,8 +148,13 @@ for linha in sys.stdin:
 // beatitudeTranscritorComando monta o processo; variavel para o teste trocar
 // o faster-whisper por um stub que fala o mesmo protocolo.
 var beatitudeTranscritorComando = func(uv, script, modelos string) *exec.Cmd {
-	return exec.Command(uv, "run", "--no-project", "--python", "3.11", "--with", "faster-whisper",
-		"python", script, modelos, beatitudeWhisperModelo)
+	motor := beatitudeMotorTranscricao()
+	args := []string{"run", "--no-project", "--python", "3.11"}
+	for _, p := range motor.Pacotes {
+		args = append(args, "--with", p)
+	}
+	args = append(args, "python", script, modelos, motor.Modelo)
+	return exec.Command(uv, args...)
 }
 
 var beatitudeTranscritor struct {
@@ -69,6 +167,7 @@ var beatitudeTranscritor struct {
 	desde     time.Time
 	ultimoErr string
 	pedidos   int
+	motor     string // rotulo do motor em uso pelo residente
 }
 
 // beatitudeTranscritorAquecer sobe o residente em segundo plano. Chamado
@@ -101,12 +200,13 @@ func beatitudeTranscritorSubirAgora() error {
 	cwd, _ := os.Getwd()
 	dir := filepath.Join(cwd, beatitudeWorkDir)
 	_ = os.MkdirAll(filepath.Join(dir, "modelos"), 0o700)
+	motor := beatitudeMotorTranscricao()
 	script := filepath.Join(dir, "transcritor-residente.py")
-	if err := os.WriteFile(script, []byte(beatitudeTranscritorResidente), 0o600); err != nil {
+	if err := os.WriteFile(script, []byte(motor.Script), 0o600); err != nil {
 		return err
 	}
 	cmd := beatitudeTranscritorComando(uv, script, filepath.Join(dir, "modelos"))
-	cmd.Env = beatitudeAmbiente()
+	cmd.Env = append(beatitudeAmbiente(), "HF_HOME="+filepath.Join(dir, "modelos", "hf"))
 	cmd.Stderr = nil // o faster-whisper e o uv falam no stderr; nao precisamos
 	entrada, err := cmd.StdinPipe()
 	if err != nil {
@@ -138,9 +238,10 @@ func beatitudeTranscritorSubirAgora() error {
 	beatitudeTranscritor.mu.Lock()
 	beatitudeTranscritor.cmd, beatitudeTranscritor.entrada, beatitudeTranscritor.saida = cmd, entrada, saida
 	beatitudeTranscritor.pronto, beatitudeTranscritor.desde, beatitudeTranscritor.ultimoErr = true, time.Now(), ""
+	beatitudeTranscritor.motor = motor.Rotulo
 	beatitudeTranscritor.mu.Unlock()
 	if panel.logger != nil {
-		panel.logger.Infof("Beatitude: transcritor residente pronto (modelo %s) em %.1fs", beatitudeWhisperModelo, time.Since(inicio).Seconds())
+		panel.logger.Infof("Beatitude: transcritor residente pronto (%s) em %.1fs", motor.Rotulo, time.Since(inicio).Seconds())
 	}
 	go func() { // quando o processo morrer por conta propria, esquece-o
 		_ = cmd.Wait()
@@ -157,14 +258,20 @@ func beatitudeTranscritorSubirAgora() error {
 // Sobe o processo se precisar; em timeout ou erro de pipe, mata e esquece,
 // para o proximo pedido subir de novo.
 func beatitudeTranscritorPedir(arquivo, dica string) (string, error) {
-	// se o aquecimento ainda esta subindo, espera por ele em vez de subir outro
-	prazo := time.Now().Add(beatitudeTranscritorSubir)
+	// se o aquecimento ainda esta subindo, espera por ele em vez de subir
+	// outro — no MLX so uns segundos: o turbo pode estar baixando, e o audio
+	// vai pelo avulso (small) enquanto isso
+	motor := beatitudeMotorTranscricao()
+	prazo := time.Now().Add(motor.EsperaSubida)
 	for {
 		beatitudeTranscritor.mu.Lock()
 		subindo := beatitudeTranscritor.subindo
 		beatitudeTranscritor.mu.Unlock()
-		if !subindo || time.Now().After(prazo) {
+		if !subindo {
 			break
+		}
+		if time.Now().After(prazo) {
+			return "", fmt.Errorf("o modelo de voz ainda está carregando")
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -189,7 +296,7 @@ func beatitudeTranscritorPedir(arquivo, dica string) (string, error) {
 		beatitudeTranscritorMatar()
 		return "", fmt.Errorf("escrevendo ao transcritor: %v", err)
 	}
-	linha, err := beatitudeLerLinha(beatitudeTranscritor.saida, beatitudeTranscritorPrazo)
+	linha, err := beatitudeLerLinha(beatitudeTranscritor.saida, motor.Prazo)
 	if err != nil {
 		beatitudeTranscritorMatar()
 		return "", fmt.Errorf("lendo do transcritor: %v", err)
@@ -224,11 +331,20 @@ func beatitudeTranscritorEstado() map[string]interface{} {
 	return map[string]interface{}{
 		"pronto":     beatitudeTranscritor.pronto,
 		"subindo":    beatitudeTranscritor.subindo,
-		"modelo":     beatitudeWhisperModelo,
+		"modelo":     beatitudeVozRotulo(beatitudeTranscritor.motor),
 		"desde":      beatitudeTranscritor.desde,
 		"pedidos":    beatitudeTranscritor.pedidos,
 		"ultimo_err": beatitudeTranscritor.ultimoErr,
 	}
+}
+
+// beatitudeVozRotulo: o motor em uso (o do residente, se ja subiu; senao o
+// que esta maquina vai usar).
+func beatitudeVozRotulo(emUso string) string {
+	if emUso != "" {
+		return emUso
+	}
+	return beatitudeMotorTranscricao().Rotulo
 }
 
 // beatitudeLerLinha le uma linha com limite de tempo. O leitor fica numa

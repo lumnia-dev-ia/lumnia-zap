@@ -35,6 +35,10 @@ type prontidaoItem struct {
 	OK    bool   `json:"ok"`
 	Visto string `json:"visto"`
 	Fazer string `json:"fazer,omitempty"`
+	// Aviso (1.1.2): conta para quem quer o Mac de pé depois de um
+	// reinício (FileVault, entrada automática), mas não derruba a ponte
+	// enquanto o Mac está ligado. Aparece em amarelo e não entra no "pronta".
+	Aviso bool `json:"aviso,omitempty"`
 }
 
 var prontidaoCache struct {
@@ -62,13 +66,20 @@ func prontidaoItens(agora bool) []prontidaoItem {
 		prontidaoSemEncerramentoAutomatico(),
 		prontidaoSemRepouso(),
 	}
+	// Claude e Chrome abertos (zelador.go): só contam com o mordomo ligado
+	if zeladorLigado() {
+		for _, a := range zeladorApps {
+			prontidaoCache.itens = append(prontidaoCache.itens, prontidaoAppAberto(a))
+		}
+	}
+	prontidaoCache.itens = append(prontidaoCache.itens, prontidaoFileVault(), prontidaoEntradaAutomatica())
 	prontidaoCache.em = time.Now()
 	return prontidaoCache.itens
 }
 
 func prontidaoTudoOK(itens []prontidaoItem) bool {
 	for _, c := range itens {
-		if !c.OK {
+		if !c.OK && !c.Aviso {
 			return false
 		}
 	}
@@ -85,6 +96,14 @@ func prontidaoResumo() map[string]interface{} {
 		"ok":    prontidaoTudoOK(itens),
 		"itens": itens,
 	}
+}
+
+// prontidaoInvalidar faz a próxima leitura conferir de novo (o zelador
+// acabou de mexer nos apps).
+func prontidaoInvalidar() {
+	prontidaoCache.mu.Lock()
+	prontidaoCache.em = time.Time{}
+	prontidaoCache.mu.Unlock()
 }
 
 // prontidaoEstado e o que a ponte manda no sinal de vida (campo `estado`,
@@ -206,6 +225,56 @@ func prontidaoSemRepouso() prontidaoItem {
 		c.Visto = fmt.Sprintf("entra em repouso após %d min", minutos)
 		c.Fazer = "Dormindo, a ponte não recebe nem manda nada. No Terminal: sudo pmset -a sleep 0 (pede a senha de administrador)."
 	}
+	return c
+}
+
+func prontidaoAppAberto(a zeladorApp) prontidaoItem {
+	c := prontidaoItem{Chave: a.Chave + "_aberto", Nome: a.Nome + " aberto"}
+	switch {
+	case !zeladorInstalado(a):
+		c.Visto = "não instalado"
+		if a.Chave == "claude" {
+			c.Fazer = "Instale o Claude (claude.ai/download) e entre com a sua conta. É por ele que uma conversa do Claude liga este " + maquina() + "."
+		} else {
+			c.Fazer = "Instale o Google Chrome e a extensão Claude in Chrome, entrando com a sua conta. É o navegador das tarefas aprovadas no grupo."
+		}
+	case zeladorAberto(a.Processo):
+		c.OK, c.Visto = true, "aberto"
+	default:
+		c.Visto = "fechado"
+		c.Fazer = "A ponte tenta abrir sozinha a cada 5 minutos. Se continuar fechado, abra o " + a.Nome + " e deixe aberto (pode minimizar)."
+	}
+	return c
+}
+
+func prontidaoFileVault() prontidaoItem {
+	out, err := exec.Command("/usr/bin/fdesetup", "status").CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	c := prontidaoItem{Chave: "filevault_desligado", Nome: "FileVault desligado", Aviso: true}
+	switch {
+	case err == nil && strings.Contains(s, "FileVault is Off"):
+		c.OK, c.Visto = true, "desligado"
+	case err == nil && strings.Contains(s, "FileVault is On"):
+		c.Visto = "ligado"
+		c.Fazer = "Com o FileVault ligado, depois de uma queda de energia o Mac para na tela de senha e a ponte só volta quando alguém entrar. " +
+			"Num Mac que fica em lugar seguro e serve só de ponte, desligue em Ajustes > Privacidade e Segurança > FileVault. Num notebook que sai de casa, deixe ligado."
+	default:
+		c.Visto = "não consegui ler o fdesetup"
+	}
+	return c
+}
+
+func prontidaoEntradaAutomatica() prontidaoItem {
+	out, err := exec.Command("/usr/bin/defaults", "read", "/Library/Preferences/com.apple.loginwindow", "autoLoginUser").CombinedOutput()
+	usuario := strings.TrimSpace(string(out))
+	c := prontidaoItem{Chave: "entrada_automatica", Nome: "Entrada automática ligada", Aviso: true}
+	if err == nil && usuario != "" {
+		c.OK, c.Visto = true, "entra como "+usuario
+		return c
+	}
+	c.Visto = "desligada"
+	c.Fazer = "Sem entrada automática, depois de reiniciar o Mac a ponte só volta quando alguém fizer login. " +
+		"Ligue em Ajustes > Usuários e Grupos > \"Iniciar sessão automaticamente como\" (precisa do FileVault desligado). O bloqueio de tela com senha continua valendo."
 	return c
 }
 

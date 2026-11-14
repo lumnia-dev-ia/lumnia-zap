@@ -97,3 +97,41 @@ func TestLerLinhaTimeout(t *testing.T) {
 }
 
 func bufioReader(f *os.File) *bufio.Reader { return bufio.NewReader(f) }
+
+func TestMotorTranscricaoPorSistema(t *testing.T) {
+	antigoOS, antigoArch := beatitudeVozGOOS, beatitudeVozGOARCH
+	defer func() { beatitudeVozGOOS, beatitudeVozGOARCH = antigoOS, antigoArch }()
+	t.Setenv("LUMNIA_ZAP_VOZ", "")
+
+	beatitudeVozGOOS, beatitudeVozGOARCH = "darwin", "arm64"
+	m := beatitudeMotorTranscricao()
+	if m.Nome != "mlx" || m.Modelo != beatitudeMLXRepo || m.EsperaSubida > 5*time.Second {
+		t.Fatalf("Mac com chip Apple devia usar o MLX sem esperar a subida: %+v", m)
+	}
+	cmd := beatitudeTranscritorComando("uv", "s.py", "/m")
+	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "--with mlx-whisper") || !strings.Contains(got, "--with av") || !strings.HasSuffix(got, "s.py /m "+beatitudeMLXRepo) {
+		t.Errorf("comando MLX: %s", got)
+	}
+
+	t.Setenv("LUMNIA_ZAP_VOZ", "small")
+	if m := beatitudeMotorTranscricao(); m.Nome != "faster-whisper" {
+		t.Errorf("LUMNIA_ZAP_VOZ=small devia forçar o faster-whisper: %+v", m)
+	}
+	t.Setenv("LUMNIA_ZAP_VOZ", "")
+
+	for _, so := range [][2]string{{"linux", "amd64"}, {"darwin", "amd64"}, {"windows", "amd64"}} {
+		beatitudeVozGOOS, beatitudeVozGOARCH = so[0], so[1]
+		if m := beatitudeMotorTranscricao(); m.Nome != "faster-whisper" || m.Modelo != "small" {
+			t.Errorf("%v devia seguir no small: %+v", so, m)
+		}
+	}
+}
+
+func TestDicaTemVocabularioDepoisDosNomes(t *testing.T) {
+	d := beatitudeDicaTranscricao()
+	i := strings.Index(d, "Contatos:")
+	j := strings.Index(d, "ElevenLabs")
+	if i < 0 || j < 0 || j < i {
+		t.Fatalf("o vocabulário fixo tem de vir depois dos nomes: %q", d)
+	}
+}

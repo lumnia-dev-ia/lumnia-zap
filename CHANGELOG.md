@@ -1,5 +1,46 @@
 # Mudanças
 
+## 1.1.2 — novembro de 2026
+
+Mais do Claude e do Mac pelo grupo do Beatitude.
+
+**O bastão**
+- Quando o pedido passa do alcance do mordomo (um projeto do claude.ai,
+  arquivos do computador, o código de um app, um conector fora da lista), o
+  grupo recebe um aviso e, em mensagem separada, o texto pronto para colar numa
+  conversa do Claude, nova ou num projeto. A resposta volta ao grupo com o
+  código (B12) pela ferramenta `devolver_ao_grupo` do Beatitude. Mensagem a
+  terceiros nunca sai por aí: vira ação que espera o "sim N".
+- Comando *bastões* lista o que está esperando volta (valem 24 h).
+- O mordomo passa a saber o que alcança nesta máquina (conectores, Chrome,
+  transcritor) e responde isso sem inventar.
+
+**Chrome**
+- Usa só o Chrome deste computador (marca da extensão), nunca o de outro Mac
+  ligado à mesma conta.
+- Login, código ou CAPTCHA: a tarefa para na aba, avisa no grupo com o link
+  "Ver a máquina" (endereço salvo no app) e retoma a mesma sessão com
+  *continua N*. Nunca digita senha nem código. Parada há 30 min, é cancelada.
+
+**Mac sempre pronto**
+- Com o mordomo ligado, a ponte reabre o Claude e o Chrome em segundo plano
+  quando fecham (o Claude só depois de duas conferências seguidas fechado, para não atrapalhar o
+  instalador nem o Reparar); avisa no grupo se não conseguir.
+- "Pronta para rodar sozinha" ganha Claude aberto, Chrome aberto e, em
+  amarelo, FileVault e entrada automática (o que decide se a ponte volta
+  sozinha depois de uma queda de energia). Tudo vai no sinal de vida.
+
+**Voz**
+- Mac com Apple Silicon: Whisper large-v3-turbo no chip (mlx), com
+  vocabulário fixo (Beatitude, Lumnia, Timão…) depois dos nomes do círculo.
+  O small segue como reserva e no Linux.
+
+**Conectores**
+- Lovable e Read AI, só leitura.
+
+**Correção**
+- `list_chats` com `include_last_message=false` devolvia lista vazia.
+
 ## 1.1.1 — novembro de 2026
 
 Primeira versão com Mac, Windows (Store e manual) e Linux (nuvem do Beatitude)

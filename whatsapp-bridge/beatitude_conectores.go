@@ -139,6 +139,57 @@ var beatitudeConectores = []beatitudeConector{
 		},
 		Regra: "Timão (quem tem o conector ligado no Claude): você pode ler fragatas, missões, canais e o CRM, criar, mover e concluir missões, registrar no diário de bordo, criar e atualizar leads, mover lead de fase e registrar atividade. Pedido claro é para fazer: ache a fragata ou o lead pelo nome, faça e conte em uma linha o que fez (quantas missões, em qual fragata). Mandar mensagem, abrir DM ou responder em canal do Timão chega a outra pessoa: não faça; diga em uma linha que isso ela manda pelo próprio Timão. Não apague nada no Timão.",
 	},
+
+	{
+		ID:   "lovable",
+		Nome: "Lovable (só leitura)",
+		// 14-11: o mordomo nao sabia responder "qual transcritor o app usa"
+		// porque nao alcancava o codigo. So leitura: ler projetos, arquivos,
+		// buscar no codigo e ver o historico. Nada que publique, edite, gaste
+		// credito ou mexa no banco (query_database tambem escreve).
+		Servidores: []string{"Lovable"},
+		Liberadas: []string{
+			"mcp__claude_ai_Lovable__list_projects",
+			"mcp__claude_ai_Lovable__get_project",
+			"mcp__claude_ai_Lovable__list_files",
+			"mcp__claude_ai_Lovable__read_file",
+			"mcp__claude_ai_Lovable__grep_files",
+			"mcp__claude_ai_Lovable__get_diff",
+			"mcp__claude_ai_Lovable__list_edits",
+			"mcp__claude_ai_Lovable__get_project_knowledge",
+		},
+		Negadas: []string{
+			"mcp__claude_ai_Lovable__send_message", "mcp__claude_ai_Lovable__deploy_project",
+			"mcp__claude_ai_Lovable__create_project", "mcp__claude_ai_Lovable__initiate_project",
+			"mcp__claude_ai_Lovable__remix_project", "mcp__claude_ai_Lovable__query_database",
+			"mcp__claude_ai_Lovable__enable_database", "mcp__claude_ai_Lovable__add_connector",
+			"mcp__claude_ai_Lovable__set_project_knowledge", "mcp__claude_ai_Lovable__set_workspace_knowledge",
+			"mcp__claude_ai_Lovable__respond_to_approval", "mcp__claude_ai_Lovable__set_project_visibility",
+		},
+		Regra: "Lovable (quem tem o conector ligado no Claude): só leitura. Você pode listar os projetos, ler arquivos, buscar no código (grep_files) e ver o histórico de alterações para responder como um app funciona. Nunca peça ao agente do Lovable para mudar nada, nunca publique e não consulte o banco; se a pessoa quiser mudar algo, passe o bastão.",
+	},
+	{
+		ID:   "readai",
+		Nome: "Read AI (só leitura)",
+		// Reunioes gravadas: listar, ler resumo e transcricao. Compartilhar e
+		// reorganizar pastas fica de fora.
+		Servidores: []string{"Read_AI"},
+		Liberadas: []string{
+			"mcp__claude_ai_Read_AI__list_meetings",
+			"mcp__claude_ai_Read_AI__get_meeting_by_id",
+			"mcp__claude_ai_Read_AI__search_meeting_agent",
+			"mcp__claude_ai_Read_AI__list_folders",
+			"mcp__claude_ai_Read_AI__get_folder",
+			"mcp__claude_ai_Read_AI__list_folder_items",
+		},
+		Negadas: []string{
+			"mcp__claude_ai_Read_AI__share_meeting_report", "mcp__claude_ai_Read_AI__share_folder",
+			"mcp__claude_ai_Read_AI__create_folder", "mcp__claude_ai_Read_AI__update_folder",
+			"mcp__claude_ai_Read_AI__delete_folder", "mcp__claude_ai_Read_AI__add_folder_items",
+			"mcp__claude_ai_Read_AI__remove_folder_items", "mcp__claude_ai_Read_AI__create_meeting_agent",
+		},
+		Regra: "Read AI (quem tem o conector ligado no Claude): só leitura das reuniões dela. Ache a reunião pelo título ou pela data e resuma o que foi pedido (decisões, pendências, quem ficou de quê). Não cite trechos longos da transcrição e não compartilhe nada.",
+	},
 }
 
 // Base do mordomo: o que vale com ou sem conector.
@@ -169,6 +220,8 @@ var beatitudeNegadasBase = []string{
 	"mcp__lumnia-zap__download_media",
 	"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Read", "Glob", "Grep",
 	"WebFetch", "Task", "Agent",
+	// o bastão volta pela conversa do Claude dela, nunca pelo mordomo (1.1.2)
+	"mcp__beatitude__devolver_ao_grupo", "mcp__claude_ai_Beatitude__devolver_ao_grupo",
 }
 
 // beatitudeFerramentasLiberadas / Negadas: as listas com TODOS os conectores
@@ -213,6 +266,28 @@ func beatitudeRegrasConectores(ids []string) []string {
 		out = append(out, strings.Split(c.Regra, "\n")...)
 	}
 	return out
+}
+
+// beatitudeOQueAlcanco: a linha do prompt que diz ao mordomo o que ele
+// alcança NESTA máquina, gerada do catálogo ativo. Sem ela, em 14-11 ele
+// respondeu "qual transcritor o Beatitude usa?" com "olhe a configuração da
+// ponte": não sabia o próprio motor de voz nem o que estava fora do alcance.
+func beatitudeOQueAlcanco(ids []string) string {
+	var nomes []string
+	for _, c := range beatitudeConectoresAtivos(ids) {
+		nomes = append(nomes, c.Nome)
+	}
+	conectores := "nenhum conector extra"
+	if len(nomes) > 0 {
+		conectores = strings.Join(nomes, ", ")
+	}
+	return "O que você alcança neste " + maquina() + " (use isto, sem inventar, quando ela perguntar o que você consegue fazer, qual ferramenta ou modelo você usa, ou por que algo não deu): " +
+		"o WhatsApp dela (ler conversas e contatos; mensagem a alguém só como rascunho que ela aprova); o Beatitude; pesquisa simples na web; " +
+		"os conectores " + conectores + " (cada um só funciona se estiver ligado na conta Claude dela); " +
+		"o Chrome deste " + maquina() + " em tarefa que ela aprova; imagens e PDFs do grupo, lidos neste " + maquina() + "; " +
+		"os áudios do grupo, transcritos neste " + maquina() + " pelo Whisper (" + beatitudeVozRotulo("") + "), sem sair da máquina. " +
+		"Você NÃO alcança: os projetos do claude.ai, os arquivos deste " + maquina() + ", o código dos apps (fora o que o Lovable mostra) nem conectores fora desta lista. Para isso existe o bastão (regra abaixo). " +
+		"Você é o Claude da Anthropic rodando pelo Claude Code; o modelo de cada resposta é o que a ponte escolheu (o padrão, ou o mais forte quando ela pede \"pensa melhor\")."
 }
 
 // beatitudeIDsValidos filtra o que veio do painel: só ids do catálogo, sem

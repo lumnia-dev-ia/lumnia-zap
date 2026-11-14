@@ -155,7 +155,7 @@
     </div>
   </div>
 
-  <!-- PRONTA PARA RODAR SOZINHA (prontidao.go) — só aparece com algo vermelho -->
+  <!-- PRONTA PARA RODAR SOZINHA (prontidao.go) — só aparece com algo vermelho ou amarelo -->
   <div class="card" id="prontidao" style="display:none;border-color:var(--critical)">
     <h2>Este Mac pode parar a ponte quando ninguém estiver olhando</h2>
     <ul id="prontidao-lista" style="margin:0 0 12px;padding-left:0;list-style:none;font-size:13.5px;color:var(--ink-2)"></ul>
@@ -536,11 +536,16 @@ function onbConcluir(concluido) {
 /* ---------- pronta para rodar sozinha (prontidao.go) ---------- */
 function mostrarProntidao(p) {
   const card = $('prontidao');
-  if (!p || p.ok) { card.style.display = 'none'; return; }
+  const avisos = p && p.itens.some(c => c.aviso && !c.ok);
+  if (!p || (p.ok && !avisos)) { card.style.display = 'none'; return; }
+  card.style.borderColor = p.ok ? '#c98a00' : 'var(--critical)';
+  card.querySelector('h2').textContent = p.ok
+    ? 'Depois de um reinício, este Mac precisa de alguém'
+    : 'Este Mac pode parar a ponte quando ninguém estiver olhando';
   const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   $('prontidao-lista').innerHTML = p.itens.map(c => `
     <li style="padding:7px 0;border-top:1px solid var(--hairline)">
-      <span style="font-weight:560;color:${c.ok ? 'var(--good-ink)' : 'var(--critical)'}">${c.ok ? '✓' : '✗'} ${esc(c.nome)}</span>
+      <span style="font-weight:560;color:${c.ok ? 'var(--good-ink)' : (c.aviso ? '#9a6a00' : 'var(--critical)')}">${c.ok ? '✓' : (c.aviso ? '!' : '✗')} ${esc(c.nome)}</span>
       <span style="color:var(--ink-muted)"> · ${esc(c.visto)}</span>
       ${c.fazer ? `<div style="margin-top:3px;color:var(--ink)">${esc(c.fazer)}</div>` : ''}
     </li>`).join('');

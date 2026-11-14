@@ -178,8 +178,23 @@ func beatitudeDicaTranscricao() string {
 			rows.Close()
 		}
 	}
+	// O Whisper so usa o fim da dica (~220 tokens) quando ela e longa: o
+	// vocabulario fixo vem depois dos nomes para nunca ser cortado.
+	if len(nomes) > 30 {
+		nomes = nomes[:30]
+	}
 	return "Pedido ao assistente Beatitude. Contatos: " + strings.Join(nomes, ", ") +
+		". Termos: " + strings.Join(beatitudeVocabularioVoz, ", ") +
 		". E-mails como diego@lumnia.dev e nome@gmail.com. Agenda, almoço, reunião, pendentes, temas."
+}
+
+// beatitudeVocabularioVoz: nomes de produtos e empresas que o Whisper erra
+// (14-11: "Elevren Labs"). Curto de proposito; os nomes de pessoas vem das
+// conversas.
+var beatitudeVocabularioVoz = []string{
+	"Beatitude", "Lumnia", "Lumnia Zap", "Claude", "Anthropic", "Lovable", "ElevenLabs",
+	"Timão", "Katelline", "Evoque", "Amigo", "Prontus", "KCEA", "Rhesus", "Culture Compass",
+	"WhatsApp", "Gmail", "Google Drive", "Outlook",
 }
 
 // ---------------------------------------------------------------- rascunhos

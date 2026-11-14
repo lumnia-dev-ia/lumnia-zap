@@ -86,3 +86,29 @@ func TestServidorDaFerramenta(t *testing.T) {
 		t.Error("Drive deveria cair no conector Google")
 	}
 }
+
+// 14-11: Lovable e Read AI entram só para leitura; nada que publique, edite,
+// gaste crédito, escreva no banco ou compartilhe.
+func TestLovableEReadAISoLeitura(t *testing.T) {
+	lib, neg := beatitudeMontarListas([]string{"lovable", "readai"})
+	libs := strings.Join(lib, ",")
+	for _, quer := range []string{"mcp__claude_ai_Lovable__read_file", "mcp__claude_ai_Lovable__grep_files", "mcp__claude_ai_Read_AI__get_meeting_by_id"} {
+		if !strings.Contains(libs, quer) {
+			t.Errorf("faltou liberar %s", quer)
+		}
+	}
+	for _, l := range lib {
+		if l == "mcp__claude_ai_Lovable" || l == "mcp__claude_ai_Read_AI" {
+			t.Errorf("servidor inteiro liberado: %s", l)
+		}
+	}
+	negs := strings.Join(neg, ",")
+	for _, quer := range []string{"Lovable__send_message", "Lovable__deploy_project", "Lovable__query_database", "Read_AI__share_meeting_report"} {
+		if !strings.Contains(negs, quer) {
+			t.Errorf("faltou negar %s", quer)
+		}
+	}
+	if nome := beatitudeNomeDoServidor("Read_AI"); nome != "Read AI (só leitura)" {
+		t.Errorf("nome do Read AI: %q", nome)
+	}
+}

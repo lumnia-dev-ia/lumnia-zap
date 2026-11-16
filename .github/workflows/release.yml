@@ -15,6 +15,11 @@
 #   APPLE_API_KEY_ID      o Key ID dessa chave
 #   APPLE_API_ISSUER_ID   o Issuer ID da página de chaves
 #
+# Por tag só roda com a variável do repositório RELEASE_POR_TAG = sim
+# (Settings → Secrets and variables → Actions → Variables), depois de cadastrar
+# os segredos. Sem ela, uma tag criada pelo release.sh ou pelo workflow do
+# Windows não dispara este workflow (16-11: disparou e falhou sem segredos).
+#
 # Linux não aparece aqui: as máquinas da nuvem compilam do código e se
 # atualizam pela branch (scripts/nuvem/atualizar.sh).
 
@@ -38,7 +43,8 @@ concurrency:
 
 jobs:
   mac:
-    runs-on: macos-14 # Apple Silicon
+    if: github.event_name == 'workflow_dispatch' || vars.RELEASE_POR_TAG == 'sim'
+    runs-on: macos-latest # Apple Silicon ("macos-14" não é aceito nesta conta)
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4

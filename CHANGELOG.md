@@ -17,6 +17,16 @@
   ler": a ponte avisa que recebeu e que pode mandá-los junto de uma mensagem.
 - Agendador do painel: agendamento pode levar arquivo (coluna `media_path`).
 
+**Atualizações sem trabalho manual**
+- Máquinas da nuvem: atualização automática toda madrugada (3h40) pela branch
+  instalada. Compila à parte, troca o binário, confere se o Zap subiu e, se
+  não, volta sozinho ao anterior. Adia se houver mensagem agendada para os
+  próximos 10 minutos. Para segurar uma máquina:
+  `touch /home/beatitude/.config/lumnia/sem-atualizacao`.
+- Release: uma tag `vX.Y.Z` publica Mac (assinado e notarizado) e Windows pelo
+  GitHub Actions (`.github/workflows/release.yml`). O `release.sh` aceita a
+  chave da API da App Store Connect no lugar do perfil do Keychain.
+
 ## 1.1.2 — novembro de 2026
 
 Mais do Claude e do Mac pelo grupo do Beatitude.

@@ -13,8 +13,13 @@
 #
 # Pre-requisitos:
 #   - identidade "Developer ID Application: ... (5K8YAHD77Y)" no Keychain
-#   - perfil de notarizacao "lumnia-zap"
+#   - perfil de notarizacao "lumnia-zap" OU, sem perfil (GitHub Actions), a
+#     chave da API da App Store Connect nas variaveis APPLE_API_KEY_PATH (.p8),
+#     APPLE_API_KEY_ID e APPLE_API_ISSUER_ID
 #   - gh autenticado
+#
+# No GitHub Actions: .github/workflows/release.yml roda este script num Mac
+# Apple Silicon quando uma tag vX.Y.Z e enviada (ver o cabecalho dele).
 
 set -euo pipefail
 
@@ -40,6 +45,17 @@ feito()  { [ -f "$STATE/$1" ]; }
 marcar() { touch "$STATE/$1"; }
 
 [ "$(uname -m)" = "arm64" ] || falhar "precisa rodar num Mac Apple Silicon"
+
+# Credencial da notarizacao: perfil do Keychain (no seu Mac) ou chave de API
+# (no GitHub Actions, onde nao ha perfil salvo).
+if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+  [ -f "$APPLE_API_KEY_PATH" ] || falhar "APPLE_API_KEY_PATH não existe"
+  [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ] \
+    || falhar "faltam APPLE_API_KEY_ID e APPLE_API_ISSUER_ID"
+  CRED=(--key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+else
+  CRED=(--keychain-profile "$PERFIL")
+fi
 security find-identity -v -p codesigning | grep -q "5K8YAHD77Y" \
   || falhar "identidade de assinatura não encontrada no Keychain"
 command -v gh >/dev/null || falhar "gh não instalado"
@@ -60,7 +76,7 @@ enviar() {
   # NAO encadear o notarytool direto num pipe: com set -e -o pipefail, uma
   # falha dele matava o script ANTES de imprimir qualquer coisa — o erro real
   # sumia junto. Capturamos a resposta inteira e mostramos se nao vier o id.
-  saida="$(xcrun notarytool submit "$zip" --keychain-profile "$PERFIL" --no-wait 2>&1)" || true
+  saida="$(xcrun notarytool submit "$zip" "${CRED[@]}" --no-wait 2>&1)" || true
   id="$(printf '%s\n' "$saida" | awk '/^[[:space:]]*id:/ {print $2; exit}')"
   if [ -z "$id" ]; then
     printf '%s\n' "$saida" | sed 's/^/     /'
@@ -77,14 +93,14 @@ aguardar() {
   id="$(cat "$STATE/$nome.id")"
   printf '     %s: aguardando' "$nome"
   while :; do
-    status="$(xcrun notarytool info "$id" --keychain-profile "$PERFIL" 2>&1 \
+    status="$(xcrun notarytool info "$id" "${CRED[@]}" 2>&1 \
               | awk '/^[[:space:]]*status:/ {print $2; exit}')" || true
     case "$status" in
       Accepted)
         printf ' aceito\n'; marcar "$nome.notarized"; return 0 ;;
       Invalid|Rejected)
         printf ' RECUSADO\n\n'
-        xcrun notarytool log "$id" --keychain-profile "$PERFIL" || true
+        xcrun notarytool log "$id" "${CRED[@]}" || true
         falhar "a Apple recusou $nome (veja o relatório acima)" ;;
       *)
         printf '.'; sleep 15 ;;

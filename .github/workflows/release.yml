@@ -1,0 +1,113 @@
+# release.yml — uma tag publica a versão inteira: Mac (assinado e
+# notarizado) e Windows, no mesmo release do GitHub. Depois disso, as pontes
+# instaladas se atualizam sozinhas (atualizacao.go, a cada 6 h).
+#
+#   git tag v1.1.3 && git push origin v1.1.3
+#
+# Também roda à mão (Actions → Release → Run workflow), com a versão.
+#
+# Segredos do repositório (Settings → Secrets and variables → Actions):
+#   MAC_CERT_P12_BASE64   certificado "Developer ID Application" exportado do
+#                         Keychain como .p12, em base64 (base64 -i cert.p12 | pbcopy)
+#   MAC_CERT_PASSWORD     a senha usada ao exportar o .p12
+#   APPLE_API_KEY_P8      conteúdo do arquivo AuthKey_XXXX.p8 (App Store Connect →
+#                         Usuários e acesso → Integrações → Chaves, papel Developer)
+#   APPLE_API_KEY_ID      o Key ID dessa chave
+#   APPLE_API_ISSUER_ID   o Issuer ID da página de chaves
+#
+# Linux não aparece aqui: as máquinas da nuvem compilam do código e se
+# atualizam pela branch (scripts/nuvem/atualizar.sh).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão a publicar (ex.: 1.1.3)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-14 # Apple Silicon
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp-bridge/go.mod
+
+      - name: Versão
+        id: v
+        run: |
+          v="${{ inputs.versao }}"
+          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          echo "versao=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Certificado no Keychain temporário
+        env:
+          P12: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          P12_SENHA: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/release.keychain-db"
+          KC_SENHA="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_SENHA" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_SENHA" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_SENHA" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_SENHA" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Chave da App Store Connect
+        env:
+          P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          printf '%s\n' "$P8" > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Compilar, assinar, notarizar e publicar (release.sh --fresh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: bash scripts/release.sh "${{ steps.v.outputs.versao }}" --fresh
+
+      - name: Limpar credenciais
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  windows:
+    needs: mac # o Mac cria o release; o Windows sobe os arquivos nele
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp-bridge/go.mod
+
+      - name: Instalar mingw-w64 e zip
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 zip
+
+      - name: Compilar e publicar (release-windows.sh --fresh)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ inputs.versao }}"
+          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          bash scripts/release-windows.sh "$v" --fresh

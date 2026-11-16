@@ -13,7 +13,8 @@
 #   - Google Chrome, aberto sozinho na área de trabalho;
 #   - Claude Code, uv e o servidor MCP do Zap;
 #   - Lumnia Zap compilado desta branch, como serviço do sistema (painel em 127.0.0.1:8080,
-#     só visível de dentro da área de trabalho).
+#     só visível de dentro da área de trabalho);
+#   - atualização automática de madrugada pela mesma branch (atualizar.sh).
 #
 # É idempotente: rodar de novo atualiza o Zap e confere o resto.
 # Os logins (Google/Microsoft, Claude, WhatsApp) são da pessoa e ficam fora do script.
@@ -304,17 +305,48 @@ WantedBy=timers.target
 UNIT
 chmod +x "$DESTINO/scripts/nuvem/verificar.sh"
 
+# Atualização: toda madrugada busca a branch, compila e troca o Zap; volta
+# sozinho ao anterior se não subir (scripts/nuvem/atualizar.sh). Roda como
+# root porque reinicia o serviço; o código é compilado como $USUARIO.
+install -d -o "$USUARIO" -g "$USUARIO" "$CASA/.config/lumnia"
+printf '%s\n' "$BRANCH" > "$CASA/.config/lumnia/branch"
+chown "$USUARIO:$USUARIO" "$CASA/.config/lumnia/branch"
+cat > /etc/systemd/system/lumnia-atualizar.service <<UNIT
+[Unit]
+Description=Beatitude: atualiza o Lumnia Zap pela branch $BRANCH
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$DESTINO/scripts/nuvem/atualizar.sh
+UNIT
+
+cat > /etc/systemd/system/lumnia-atualizar.timer <<UNIT
+[Unit]
+Description=Beatitude: atualização do Zap às 3h40
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+chmod +x "$DESTINO/scripts/nuvem/atualizar.sh"
+
 # O terminal da tela não é shell de login: o PATH vai no .bashrc.
 grep -q 'lumnia: PATH' "$CASA/.bashrc" 2>/dev/null || \
   echo 'export PATH="$HOME/.local/bin:/usr/local/go/bin:$PATH" # lumnia: PATH' >> "$CASA/.bashrc"
 
 systemctl daemon-reload
-systemctl enable lumnia-tela.service lumnia-zap.service lumnia-manha.timer lumnia-verificar.timer
+systemctl enable lumnia-tela.service lumnia-zap.service lumnia-manha.timer lumnia-verificar.timer lumnia-atualizar.timer
 # A tela só reinicia se estiver parada: reiniciar derruba a sessão (e o Chrome) da pessoa.
 systemctl is-active --quiet lumnia-tela.service || systemctl restart lumnia-tela.service
 sleep 3
 systemctl restart lumnia-zap.service
-systemctl start lumnia-manha.timer lumnia-verificar.timer
+systemctl start lumnia-manha.timer lumnia-verificar.timer lumnia-atualizar.timer
 
 # ------------------------------------------------------------------ conferência
 passo "Conferindo"
@@ -327,6 +359,7 @@ curl -fsS -o /dev/null http://127.0.0.1:8080/ && ok "painel do Zap responde" || 
 como 'test -x ~/.local/bin/claude' && ok "Claude Code instalado" || falha "Claude Code ausente"
 systemctl is-active --quiet lumnia-manha.timer && ok "rodada da manhã agendada ($(systemctl show -p NextElapseUSecRealtime --value lumnia-manha.timer))" || falha "rodada da manhã sem agendamento"
 systemctl is-active --quiet lumnia-verificar.timer && ok "verificador agendado ($(systemctl show -p NextElapseUSecRealtime --value lumnia-verificar.timer))" || falha "verificador sem agendamento"
+systemctl is-active --quiet lumnia-atualizar.timer && ok "atualização automática agendada (branch $BRANCH)" || falha "atualização automática sem agendamento"
 IP=$(curl -fsS https://api.ipify.org || hostname -I | awk '{print $1}')
 echo
 echo "Pronto. A tela abre em https://$IP:$PORTA_TELA (usuário $USUARIO e a senha escolhida)."

@@ -33,3 +33,6 @@ msix/identidade-store.env
 
 # binario do "go build" na pasta da ponte (nome do modulo)
 whatsapp-bridge/whatsapp-client
+
+# chave privada das regras do mordomo: nunca no repositório
+*.key

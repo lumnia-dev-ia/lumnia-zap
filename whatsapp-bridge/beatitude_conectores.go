@@ -263,7 +263,7 @@ func beatitudeMontarListas(ids []string) (liberadas, negadas []string) {
 func beatitudeRegrasConectores(ids []string) []string {
 	var out []string
 	for _, c := range beatitudeConectoresAtivos(ids) {
-		out = append(out, strings.Split(c.Regra, "\n")...)
+		out = append(out, strings.Split(beatitudeRegraDoConector(c), "\n")...)
 	}
 	return out
 }

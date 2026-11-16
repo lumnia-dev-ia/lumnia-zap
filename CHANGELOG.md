@@ -26,6 +26,10 @@
 - Release: uma tag `vX.Y.Z` publica Mac (assinado e notarizado) e Windows pelo
   GitHub Actions (`.github/workflows/release.yml`). O `release.sh` aceita a
   chave da API da App Store Connect no lugar do perfil do Keychain.
+- Regras do mordomo sem versão nova: o texto das regras vem de um pacote
+  assinado (`regras/mordomo.json`, Ed25519) que as pontes buscam a cada 30 min.
+  Troca, tira e acrescenta regras e o texto de cada conector. Ferramentas,
+  trava do "sim" e tetos continuam no binário. Ver `regras/LEIA-ME.md`.
 
 ## 1.1.2 — novembro de 2026
 

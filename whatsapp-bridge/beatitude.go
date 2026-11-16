@@ -403,6 +403,17 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 			beatitudeRodarPedidoNavegador(p)
 			continue
 		}
+		if p.Midia == "outro" { // Word, planilha…: não é lido, mas pode ir junto de uma mensagem
+			nome := beatitudeNomeDoArquivo(grupo, p.ID)
+			beatitudeSend(beatitudeMarca + ": recebi o arquivo " + nome + ". Não leio esse tipo, mas posso mandá-lo junto de uma mensagem.")
+			bloco := "[Arquivo enviado no grupo, não lido: " + nome + "]"
+			if p.Legenda != "" {
+				bloco += "\n" + p.Legenda
+			}
+			textos = append(textos, bloco)
+			falasLote = append(falasLote, falaNova(p.ID, p.Hora, strings.TrimSpace("[arquivo] "+nome+" "+p.Legenda), "texto"))
+			continue
+		}
 		if p.Midia != "" {
 			midiasLidas++
 			if midiasLidas > beatitudeMidiaMaxLote {
@@ -488,7 +499,8 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	beatitudeSend(beatitudeMarca + ": recebi. Estou olhando e já volto aqui.")
 
 	t0 := time.Now()
-	resposta, m, err := beatitudeRodarClaude(claude, pedido)
+	anexos := beatitudeAnexosDoGrupo(grupo, time.Now())
+	resposta, m, err := beatitudeRodarClaude(claude, pedido, anexos)
 	medida.ClaudeMs = time.Since(t0).Milliseconds()
 	medida.ModeloMs, medida.ApiMs, medida.Turnos = m.ModeloMs, m.ApiMs, m.Turnos
 	medida.TokensEntrada, medida.TokensCache, medida.TokensSaida = m.TokensEntrada, m.TokensCache, m.TokensSaida
@@ -505,7 +517,7 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	t1 := time.Now()
 	resposta, propostaNav := beatitudeSepararNavegador(resposta)
 	resposta, avisoBastao, copiarBastao, codigoBastao := beatitudeSepararBastao(resposta)
-	visivel, rascunhos := beatitudeSepararRascunhos(resposta, grupo, pedido)
+	visivel, rascunhos := beatitudeSepararRascunhos(resposta, grupo, pedido, anexos...)
 	if visivel != "" {
 		for _, parte := range beatitudePartir(visivel, beatitudeMaxChars) {
 			beatitudeSend(beatitudeMarca + "\n\n" + parte)
@@ -550,7 +562,7 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 	beatitudeRegistrarMedido(inicio, pedido, resposta, "ok", neg, &medida)
 }
 
-func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error) {
+func beatitudeRodarClaude(claude, pedido string, anexos []beatitudeAnexo) (string, beatitudeMedida, error) {
 	_ = os.MkdirAll(beatitudeWorkDir, 0o700)
 
 	beatitude.mu.Lock()
@@ -570,8 +582,9 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"Responda em português do Brasil, em segunda pessoa, sem elogio, sem hype e sem exclamação. Curto: a resposta vai ser lida no celular.",
 		"Formatação de WhatsApp: *negrito* com um asterisco, listas com hífen. Nada de títulos com #, nada de tabelas.",
 		"Você só LÊ. Não existe ferramenta de envio para você. O que você escrever na resposta final é o que a ponte vai mandar ao grupo, e só ao grupo.",
-		"Rascunhos de resposta NÃO vão no texto visível. Coloque-os, no fim da resposta, num bloco exatamente assim: <rascunhos>[{\"n\":1,\"chat_jid\":\"JID exato da conversa, como veio das ferramentas\",\"texto\":\"o rascunho\",\"enviar_em\":\"só quando ela pediu horário: AAAA-MM-DD HH:MM\"}]</rascunhos>. Numere a partir de 1, na mesma ordem em que citou as conversas no texto visível. A ponte mostra cada rascunho com o nome real da conversa e a pessoa decide se envia respondendo 'envia 1'. Nunca diga que você não pode enviar: diga que ela pode aprovar o envio.",
+		"Rascunhos de resposta NÃO vão no texto visível. Coloque-os, no fim da resposta, num bloco exatamente assim: <rascunhos>[{\"n\":1,\"chat_jid\":\"JID exato da conversa, como veio das ferramentas\",\"texto\":\"o rascunho\",\"enviar_em\":\"só quando ela pediu horário: AAAA-MM-DD HH:MM\",\"anexo\":\"só quando a mensagem leva um arquivo do grupo: A1\"}]</rascunhos>. Numere a partir de 1, na mesma ordem em que citou as conversas no texto visível. A ponte mostra cada rascunho com o nome real da conversa e a pessoa decide se envia respondendo 'envia 1'. Nunca diga que você não pode enviar: diga que ela pode aprovar o envio.",
 		"Mensagem com horário: se ela pedir que a mensagem saia num horário (\"às 8h30 responde a Marina\", \"amanhã às 7 manda para o Pedro\"), ponha no rascunho \"enviar_em\":\"AAAA-MM-DD HH:MM\" (horário de Brasília; a hora de agora está no fim destas regras). A ponte guarda e só envia nesse horário, depois do sim dela; serve para QUALQUER conversa do WhatsApp, esteja a pessoa em Pessoas ou não. Para quem está em Pessoas, criar_acao com horário também serve; se criar_acao não devolver número para o sim (contato fora de Pessoas, aguardando contato), use o rascunho com enviar_em, sem criar as duas coisas. Nunca ofereça envio imediato de algo que ela pediu para um horário. Se o horário for ambíguo (\"às 8\" de manhã ou de noite), pergunte em uma linha.",
+		beatitudeRegraAnexo,
 		"Escreva os rascunhos na voz da pessoa, em primeira pessoa, curtos, no tom que ela já usa com aquele contato.",
 		"Não escreva no texto visível instruções de como enviar (a ponte já escreve) nem repita os rascunhos.",
 		"Quando a pessoa pedir para responder ou mandar algo a alguém (\"responde a Lisiane que...\", \"manda pro Pedro...\"), ache a conversa certa com as ferramentas, escreva o rascunho no bloco e, no texto visível, diga em uma linha para quem vai e de que se trata. Se houver mais de uma conversa possível, pergunte qual.",
@@ -605,6 +618,9 @@ func beatitudeRodarClaude(claude, pedido string) (string, beatitudeMedida, error
 		"\n\nPedido novo da pessoa:\n" + pedido
 	if pronto := beatitudeContextoPronto(grupo, pedido); pronto != "" {
 		prompt += "\n\n" + pronto
+	}
+	if bloco := beatitudeBlocoAnexos(anexos); bloco != "" {
+		prompt += "\n\n" + bloco
 	}
 
 	beatitude.mu.Lock()

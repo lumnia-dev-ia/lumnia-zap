@@ -1,5 +1,22 @@
 # Mudanças
 
+## 1.1.3 — novembro de 2026
+
+**Arquivo junto da mensagem**
+- O mordomo manda uma mensagem e, na sequência, um arquivo. O arquivo é o que a
+  pessoa mandou ou encaminhou para o grupo Beatitude nos últimos 7 dias (foto,
+  PDF, Word, planilha); do e-mail ou do OneDrive, pelo Compartilhar do celular.
+- O cartão do rascunho mostra o arquivo ("com o arquivo comparativo.pdf"). No
+  "sim" sai o texto e logo depois o arquivo; com horário, o agendador faz o
+  mesmo na hora marcada.
+- O mordomo só escolhe o código do arquivo da lista (A1, A2…); quem acha o
+  arquivo é a ponte. Código que não existe derruba o rascunho com aviso. Se o
+  arquivo não estiver disponível no "sim", nem o texto sai. Se o texto sair e o
+  arquivo falhar, o grupo é avisado para anexar à mão.
+- Word, planilha e outros que o leitor não abre deixam de receber "não consegui
+  ler": a ponte avisa que recebeu e que pode mandá-los junto de uma mensagem.
+- Agendador do painel: agendamento pode levar arquivo (coluna `media_path`).
+
 ## 1.1.2 — novembro de 2026
 
 Mais do Claude e do Mac pelo grupo do Beatitude.

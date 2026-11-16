@@ -137,6 +137,12 @@ func ensurePanelTables(store *MessageStore) error {
 	if err != nil {
 		return err
 	}
+	// Arquivo junto do agendamento (1.1.3): o texto sai e, logo depois, o
+	// arquivo. "duplicate column" e esperado em bancos ja migrados.
+	if _, err := store.db.Exec(`ALTER TABLE panel_schedules ADD COLUMN media_path TEXT`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return err
+	}
 	return panelMetaCriar(store.db) // identidade do banco (claude_ligacao.go)
 }
 
@@ -296,7 +302,31 @@ func panelSend(recipient, message, source string) (bool, string) {
 	if n := apiSendsSince(time.Now().Add(-time.Hour)); n >= panelHourlyLimit {
 		return false, fmt.Sprintf("limite de %d envios por hora atingido", panelHourlyLimit)
 	}
-	ok, msg := sendWhatsAppMessage(panel.client, recipient, message, "")
+	ok, msg := panelEnviar(recipient, message, "")
+	if ok {
+		recordAPISend(recipient, source)
+	}
+	return ok, msg
+}
+
+// panelEnviar e o envio de fato; variavel para os testes trocarem.
+var panelEnviar = func(recipient, message, mediaPath string) (bool, string) {
+	return sendWhatsAppMessage(panel.client, recipient, message, mediaPath)
+}
+
+// panelSendArquivo manda um arquivo sozinho, sem legenda, logo depois de um
+// texto (1.1.3). Mesmo teto do panelSend: conta como um envio.
+func panelSendArquivo(recipient, mediaPath, source string) (bool, string) {
+	if strings.TrimSpace(mediaPath) == "" {
+		return false, "arquivo vazio"
+	}
+	if _, err := os.Stat(mediaPath); err != nil {
+		return false, "arquivo não encontrado"
+	}
+	if n := apiSendsSince(time.Now().Add(-time.Hour)); n >= panelHourlyLimit {
+		return false, fmt.Sprintf("limite de %d envios por hora atingido", panelHourlyLimit)
+	}
+	ok, msg := panelEnviar(recipient, "", mediaPath)
 	if ok {
 		recordAPISend(recipient, source)
 	}
@@ -465,7 +495,7 @@ func runDueSchedules() {
 	now := time.Now().In(panelLoc)
 	rows, err := store.db.Query(
 		`SELECT id, recipient, display, message, mode, at_time, COALESCE(on_date,''),
-		        weekday, day_of, month_of, COALESCE(last_key,'')
+		        weekday, day_of, month_of, COALESCE(last_key,''), COALESCE(media_path,'')
 		 FROM panel_schedules WHERE enabled = 1`)
 	if err != nil {
 		panel.logger.Warnf("Painel: falha ao ler agendamentos: %v", err)
@@ -476,13 +506,14 @@ func runDueSchedules() {
 		occ    time.Time
 		key    string
 		missed bool
+		midia  string
 	}
 	var todo []pending
 	for rows.Next() {
 		var s schedule
-		var lastKey string
+		var lastKey, midia string
 		if err := rows.Scan(&s.ID, &s.Recipient, &s.Display, &s.Message, &s.Mode,
-			&s.AtTime, &s.OnDate, &s.Weekday, &s.DayOf, &s.MonthOf, &lastKey); err != nil {
+			&s.AtTime, &s.OnDate, &s.Weekday, &s.DayOf, &s.MonthOf, &lastKey, &midia); err != nil {
 			continue
 		}
 		occ, ok := occurrenceOn(s, now)
@@ -493,7 +524,7 @@ func runDueSchedules() {
 		if key == lastKey {
 			continue // ja tratada
 		}
-		todo = append(todo, pending{s: s, occ: occ, key: key,
+		todo = append(todo, pending{s: s, occ: occ, key: key, midia: midia,
 			missed: now.Sub(occ) > panelLateTolerance})
 	}
 	rows.Close()
@@ -510,6 +541,12 @@ func runDueSchedules() {
 				panel.logger.Warnf("Painel: agendamento %d falhou: %s", p.s.ID, msg)
 			} else {
 				panel.logger.Infof("Painel: agendamento %d enviado para %s", p.s.ID, p.s.Display)
+				if p.midia != "" {
+					if ok, msg := panelSendArquivo(p.s.Recipient, p.midia, "agendamento"); !ok {
+						status = "enviada sem o arquivo: " + msg
+						panel.logger.Warnf("Painel: arquivo do agendamento %d falhou: %s", p.s.ID, msg)
+					}
+				}
 			}
 		}
 		if _, err := store.db.Exec(

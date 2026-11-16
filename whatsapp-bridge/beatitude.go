@@ -186,6 +186,7 @@ func initBeatitude() {
 	}
 	initBeatitudeExtras()
 	initBeatitudeRegras()
+	initBeatitudeReacoes()
 	initBeatitudeNavegador()
 	initBeatitudePreciso()
 	initBeatitudeBastao()
@@ -222,6 +223,13 @@ func beatitudeOnMessage(msg *events.Message) {
 		return
 	}
 	if msg.Info.Chat.String() != cfg.GrupoJID || !msg.Info.IsFromMe {
+		return
+	}
+	// 👍 no cartão e voto na enquete (beatitude_reacoes.go)
+	if r, v := msg.Message.GetReactionMessage(), msg.Message.GetPollUpdateMessage(); r != nil || v != nil {
+		if msg.Info.Timestamp.After(cfg.ConsentidoEm) && time.Since(msg.Info.Timestamp) <= beatitudeJanelaAtraso {
+			beatitudeOnReacaoOuVoto(msg)
+		}
 		return
 	}
 	texto := strings.TrimSpace(extractTextContent(msg.Message))
@@ -288,6 +296,16 @@ func beatitudeOnMessage(msg *events.Message) {
 		}
 		go func() { beatitudeSend(strings.Join(beatitudeListarBastoes(time.Now()), "\n")) }()
 		return
+	}
+	if !especial && beatitudeSimRe.MatchString(texto) { // "envia" com enquete aberta: manda o que está marcado
+		if linhas, ok := beatitudeConfirmarEnquete(time.Now()); ok {
+			if hora.After(beatitude.cfg.UltimoPedido) {
+				beatitude.cfg.UltimoPedido = hora
+				_ = beatitudeSalvar()
+			}
+			go beatitudeSend(beatitudeMarca + "\n\n" + strings.Join(beatitudeSemMarca(linhas), "\n"))
+			return
+		}
 	}
 	if !especial && beatitudeEhComando(texto) {
 		if hora.After(beatitude.cfg.UltimoPedido) {
@@ -524,10 +542,8 @@ func beatitudeExecutar(pedidos []beatitudePedido) {
 			beatitudeSend(beatitudeMarca + "\n\n" + parte)
 		}
 	}
-	if rascunhos != "" {
-		for _, parte := range beatitudePartir(rascunhos, beatitudeMaxChars) {
-			beatitudeSend(beatitudeMarca + "\n\n" + parte)
-		}
+	if rascunhos != "" { // guarda o ID de cada cartão para o 👍; com 4 ou mais, vai a enquete
+		beatitudeEnviarCartoes(rascunhos, t1)
 	}
 	if propostaNav != "" {
 		beatitudeSend(beatitudeMarca + "\n\n" + propostaNav)

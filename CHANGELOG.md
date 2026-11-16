@@ -17,6 +17,16 @@
   ler": a ponte avisa que recebeu e que pode mandá-los junto de uma mensagem.
 - Agendador do painel: agendamento pode levar arquivo (coluna `media_path`).
 
+**Aprovar com 👍 e escolher numa enquete**
+- Até 3 rascunhos: 👍 no cartão do mordomo aprova os rascunhos daquele cartão
+  (qualquer tom de pele); ❌ cancela. Outras reações não fazem nada.
+- 4 ou mais: vai junto uma enquete aberta, uma opção por rascunho ("3 · Marina
+  · sai às 20:00"). Marcar não envia; a pessoa confirma com 👍 na enquete ou
+  escrevendo *envia*. Vale o último voto.
+- Reação e voto viram o mesmo comando de texto ("envia 1 e 3", "cancela 2") e
+  passam pelas mesmas travas: horário, arquivo, teto. Só valem no cartão da
+  última lista e por até 2 horas. Eventos repetidos na reconexão são ignorados.
+
 **Atualizações sem trabalho manual**
 - Máquinas da nuvem: atualização automática toda madrugada (3h40) pela branch
   instalada. Compila à parte, troca o binário, confere se o Zap subiu e, se

@@ -354,13 +354,21 @@ func beatitudeSepararRascunhos(resposta, grupo, pedido string, anexos ...beatitu
 
 	switch {
 	case validos == 1 && agendados == 1:
-		b.WriteString("Para aprovar, responda *sim* (ou *1*): sai " + beatitudeQuando(unicoQuando, agora) + ", não antes. Para mudar o texto: *envia 1: seu texto*. Nada sai sem isso.")
+		b.WriteString("Para aprovar, responda *sim* (ou *1*) ou reaja com 👍: sai " + beatitudeQuando(unicoQuando, agora) + ", não antes. Para mudar o texto: *envia 1: seu texto*. ❌ cancela. Nada sai sem isso.")
 	case validos == 1 && travados == 1:
 		b.WriteString("Você citou um horário e este rascunho não tem horário para sair, então o *sim* não envia. Diga o horário (ex.: *às 8h30*), ou responda *agora* para enviar já.")
 	case validos == 1:
-		b.WriteString("Para enviar, responda *sim* (ou *1*). Para mudar o texto: *envia 1: seu texto*. Nada sai sem isso.")
+		b.WriteString("Para enviar, responda *sim* (ou *1*) ou reaja com 👍. Para mudar o texto: *envia 1: seu texto*. ❌ cancela. Nada sai sem isso.")
+	case validos >= beatitudeEnqueteMinimo:
+		b.WriteString("Marque na enquete abaixo os que devem sair e confirme com 👍 nela (ou escreva *envia*). Também vale responder com os números: *1 e 3* ou *todos*. Para mudar o texto: *envia 2: seu texto*. Nada sai sem isso.")
+		if agendados > 0 {
+			b.WriteString("\nOs que têm horário só saem no horário.")
+		}
+		if travados > 0 {
+			b.WriteString("\nOs marcados \"sem horário marcado\" ou com horário que passou não saem assim: diga o horário, ou responda *2 agora* para enviar já.")
+		}
 	default:
-		b.WriteString("Para aprovar, responda com o número: *1*, *1 e 3* ou *todos*. Para mudar o texto: *envia 2: seu texto*. Nada sai sem isso.")
+		b.WriteString("Para aprovar, responda com o número: *1*, *1 e 3* ou *todos*, ou reaja com 👍 para aprovar todos deste cartão. Para mudar o texto: *envia 2: seu texto*. Nada sai sem isso.")
 		if agendados > 0 {
 			b.WriteString("\nOs que têm horário só saem no horário.")
 		}

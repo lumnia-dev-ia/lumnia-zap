@@ -28,7 +28,7 @@ PESSOA=${LUMNIA_PESSOA:-}   # ex.: LUMNIA_PESSOA="o Douglas" — nome usado nos 
 SUPORTE=${LUMNIA_SUPORTE_WHATSAPP:-}   # WhatsApp do suporte da Lumnia (só dígitos, com 55) — destino do botão "Liberar suporte"
 REPO=https://github.com/lumnia-dev-ia/lumnia-zap
 DESTINO=$CASA/lumnia-zap
-GO_VERSAO=1.25.0
+GO_VERSAO=1.26.11   # a whatsmeow de nov/2026 exige Go 1.26 (atualizar.sh segue o toolchain do go.mod)
 PORTA_TELA=8444
 
 passo() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }

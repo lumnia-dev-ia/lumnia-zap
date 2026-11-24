@@ -71,6 +71,24 @@ voltar() {
 log "atualizando $BRANCH ${ANTES:0:7} → ${DEPOIS:0:7}"
 como "git -C '$DESTINO' reset -q --hard FETCH_HEAD"
 VERSAO=${DEPOIS:0:7}
+
+# Go: o código novo pode pedir um Go mais novo (1.1.4: whatsmeow de nov/2026 →
+# Go 1.26). Instala o "toolchain" do go.mod antes de compilar. Se a troca
+# falhar, o Go antigo fica e o próprio go build tenta baixar o que falta.
+GO_QUER=$(sed -n 's/^toolchain go\([0-9.]*\)$/\1/p' "$PONTE/go.mod")
+if [ -n "$GO_QUER" ] && ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go$GO_QUER "; then
+  log "instalando Go $GO_QUER"
+  TMPGO=$(mktemp -d)
+  if curl -fsSL "https://go.dev/dl/go$GO_QUER.linux-amd64.tar.gz" | tar -C "$TMPGO" -xz &&
+     "$TMPGO/go/bin/go" version >/dev/null 2>&1; then
+    rm -rf /usr/local/go.anterior
+    mv /usr/local/go /usr/local/go.anterior 2>/dev/null || true
+    mv "$TMPGO/go" /usr/local/go
+  else
+    log "aviso: não consegui baixar o Go $GO_QUER; sigo com $(/usr/local/go/bin/go version 2>/dev/null)"
+  fi
+  rm -rf "$TMPGO"
+fi
 if ! como "cd '$PONTE' && CGO_ENABLED=1 /usr/local/go/bin/go build -trimpath \
      -ldflags='-X main.versao=nuvem-$VERSAO' -o whatsapp-bridge.novo ." >>"$LOG" 2>&1; then
   como "rm -f '$PONTE/whatsapp-bridge.novo'"

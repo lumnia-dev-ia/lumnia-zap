@@ -356,12 +356,20 @@ async function refreshStatus() {
     st.className = 'state ' + (s.connected ? 'ok' : (s.needs_pair ? 'bad' : 'wait'));
     txt.textContent = s.connected ? 'Conectado'
       : (s.needs_pair ? 'Desconectado — aguardando pareamento' : 'Reconectando…');
+    const rec = !s.connected && s.whatsapp_recusou;  // 405 "Client outdated" (versao_whatsapp.go)
+    if (rec) {
+      txt.textContent = rec.demorando
+        ? 'O WhatsApp recusou esta versão do Zap — precisa atualizar o Lumnia Zap'
+        : 'O WhatsApp recusou a versão — tentando de novo sozinho'
+          + (rec.proxima_secs != null ? ` (próxima em ${humanSecs(rec.proxima_secs).replace(/^há /, '')})` : '');
+    }
 
     const bits = [];
     if (s.connected) bits.push(`<div><b>Número</b>${fmtNumber(s.number)}</div>`);
     bits.push(`<div><b>No ar há</b>${fmtUptime(s.uptime_secs)}</div>`);
     if (s.last_received_secs != null)
       bits.push(`<div><b>Última recebida</b>${humanSecs(s.last_received_secs)}</div>`);
+    if (rec) bits.push(`<div><b>Sessão</b>salva — não precisa ler o QR de novo (recusada ${humanSecs(rec.desde_secs)}; versão ${rec.versao})</div>`);
     if (s.agenda_apple) {  // só existe depois que a pessoa configurou em /apple
       const a = s.agenda_apple, n = a.calendarios || 0;
       const txt = a.estado === 'conectada' ? `conectada (${n} calendário${n === 1 ? '' : 's'})`
@@ -505,7 +513,9 @@ function mostrarOnboarding(s) {
   const dt = x => { const d = x ? new Date(String(x).replace(' ', 'T')) : null; return d && !isNaN(d) ? d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'; };
   const ligou = c.ultimo_sinal_secs != null || c.config === 'ok' || t === 'linux';
   const passos = [];
-  passos.push(btPasso(1, s.connected, 'WhatsApp conectado', s.connected ? '' : 'Escaneie o QR code abaixo com o celular.'));
+  passos.push(btPasso(1, s.connected, 'WhatsApp conectado', s.connected ? ''
+    : s.whatsapp_recusou ? 'O WhatsApp recusou a versão e o Zap está tentando de novo sozinho. Não leia o QR: a sessão está salva.'
+    : 'Escaneie o QR code abaixo com o celular.'));
   passos.push(btPasso(2, (o.mensagens || 0) > 0, 'Histórico chegando',
     `${o.mensagens || 0} mensagens em ${o.conversas || 0} conversas${o.mais_antiga ? ', de ' + dt(o.mais_antiga) + ' a ' + dt(o.mais_nova) : ''}. ` +
     'Nos primeiros minutos, deixe o WhatsApp do celular aberto e com a tela ligada; no iPhone o histórico só anda assim.'));

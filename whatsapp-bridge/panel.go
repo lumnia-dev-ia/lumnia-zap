@@ -691,7 +691,8 @@ func panelStatusHandler(w http.ResponseWriter, r *http.Request) {
 	if !lastRecv.IsZero() {
 		resp["last_received_secs"] = int(time.Since(lastRecv).Seconds())
 	}
-	ligacaoStatus(resp) // instalação, sinal do Claude, teste e primeiros passos
+	ligacaoStatus(resp)  // instalação, sinal do Claude, teste e primeiros passos
+	waVersaoStatus(resp) // versão do WhatsApp Web e 405 em aberto (versao_whatsapp.go)
 	if qrActive {
 		// O WhatsApp rotaciona o codigo a cada ~20s.
 		remaining := 20 - int(time.Since(qrSetAt).Seconds())

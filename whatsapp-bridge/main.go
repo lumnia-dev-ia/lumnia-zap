@@ -1000,7 +1000,13 @@ func main() {
 
 		case *events.Connected:
 			logger.Infof("Connected to WhatsApp")
+			waVersaoConectou() // limpa um 405 em aberto (versao_whatsapp.go)
 			lidBackfillOnce.Do(func() { go backfillLIDChatNames(client, messageStore, logger) })
+
+		case *events.ClientOutdated:
+			// 405: o WhatsApp aposentou a revisão em uso. A whatsmeow não
+			// reconecta sozinha; a sessão está intacta (versao_whatsapp.go).
+			waVersaoRecusada()
 
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please scan QR code to log in again")
@@ -1011,6 +1017,9 @@ func main() {
 	// Conexao nao-bloqueante (panel.go). Critico: se a sessao morreu, o processo
 	// precisa continuar vivo para servir o painel e exibir o QR code. O codigo
 	// original bloqueava aqui e saia por timeout, derrubando o servico em loop.
+	// Antes, a revisão atual do WhatsApp Web (no máximo 10 s; sem internet,
+	// segue a compilada). Evita o 405 "Client outdated" de 23/11/2026.
+	waVersaoIniciar()
 	panelConnect()
 
 	fmt.Println("\n✓ Ponte iniciada. Painel: http://localhost:8080")

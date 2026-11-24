@@ -2,7 +2,7 @@
 # notarizado) e Windows, no mesmo release do GitHub. Depois disso, as pontes
 # instaladas se atualizam sozinhas (atualizacao.go, a cada 6 h).
 #
-#   git tag v1.1.3 && git push origin v1.1.3
+#   git tag v1.1.4 && git push origin v1.1.4
 #
 # Também roda à mão (Actions → Release → Run workflow), com a versão.
 #
@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       versao:
-        description: "Versão a publicar (ex.: 1.1.3)"
+        description: "Versão a publicar (ex.: 1.1.4)"
         required: true
 
 permissions:

@@ -1,5 +1,33 @@
 # Mudanças
 
+## 1.1.4 — 24 de novembro de 2026
+
+**O WhatsApp voltou a aceitar a conexão**
+- Em 23/11, por volta das 20h05 (Brasília), o WhatsApp aposentou a versão do
+  WhatsApp Web que o Zap apresentava (2.3000.1043636855, da whatsmeow de
+  julho) e passou a recusar a conexão com "Client outdated (405)". Todas as
+  instalações caíram e não voltaram sozinhas. A sessão não se perdeu: depois
+  de atualizar, o Zap reconecta sem ler o QR de novo.
+- whatsmeow atualizada para a de 16/11/2026 (compila com 2.3000.1054751086),
+  com 111 commits de protocolo, reconexão, keepalive e app state. Exige Go
+  1.26 (`toolchain go1.26.11` no `go.mod`). O banco da sessão ganha duas
+  colunas na primeira vez que sobe (schema v16); a migração é automática.
+
+**Para não cair de novo do mesmo jeito**
+- Ao iniciar e a cada 6 h, a ponte lê a versão atual em web.whatsapp.com e
+  passa a usá-la se for mais nova (nunca desce; sem internet, segue a
+  compilada). Em 24/11 era 2.3000.1056029132.
+- Se o WhatsApp recusar mesmo assim (405), a ponte tenta de novo em 5 s, 1 min,
+  5 min, 15 min, 30 min e depois a cada 30 min, e reconecta na mesma sessão
+  assim que houver versão mais nova. Antes, ficava parada até reiniciar.
+- O painel diz "O WhatsApp recusou a versão — tentando de novo sozinho" e "não
+  precisa ler o QR de novo", em vez de "Reconectando…". Depois de 1 h, diz que
+  é preciso atualizar o Lumnia Zap. Onde a ponte está pareada ao Beatitude,
+  o suporte recebe um aviso depois de 5 min.
+- `LUMNIA_WA_VERSAO=2.3000.N` força uma versão (suporte).
+- Nuvem: o `atualizar.sh` instala o Go que o `go.mod` pede antes de compilar;
+  o `instalar.sh` passa a instalar o Go 1.26.11.
+
 ## 1.1.3 — novembro de 2026
 
 **Arquivo junto da mensagem**

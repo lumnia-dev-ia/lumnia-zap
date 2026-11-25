@@ -1,5 +1,7 @@
 # Lumnia Zap
 
+[![lumnia-dev-ia/lumnia-zap MCP server](https://glama.ai/mcp/servers/lumnia-dev-ia/lumnia-zap/badges/score.svg)](https://glama.ai/mcp/servers/lumnia-dev-ia/lumnia-zap)
+
 **Download and full guide: [lumnia.dev/zap](https://lumnia.dev/zap)**
 
 Your personal WhatsApp, connected locally to MCP-compatible AI agents. Read

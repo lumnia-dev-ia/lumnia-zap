@@ -33,6 +33,12 @@ descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
   Claude.
 - "SIM, enviar amanhã, 8h" e parecidos valem como *sim*.
 
+**Chave nova das regras do mordomo**
+- A chave privada de 16/11 se perdeu. A ponte passa a conferir o pacote de
+  regras com uma chave pública nova; a privada fica em `~/.lumnia/regras.key`
+  no Mac do Diego. Pontes da 1.1.4 ou anteriores ignoram os pacotes novos e
+  seguem com as regras compiladas.
+
 ## 1.1.4 — 24 de novembro de 2026
 
 **O WhatsApp voltou a aceitar a conexão**

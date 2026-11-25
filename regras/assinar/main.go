@@ -25,7 +25,7 @@ import (
 )
 
 // a mesma da ponte (whatsapp-bridge/beatitude_regras.go)
-const chavePublica = "D3X5zYTilWSiRFBIhbQLfdA3CXjd6Cn50oKOvOggMC4="
+const chavePublica = "jLsYXoQ3EkISBnWbLXfSAQavlcz5/FKM9jwpCEBDgd4="
 
 type arquivo struct {
 	Pacote     string `json:"pacote"`

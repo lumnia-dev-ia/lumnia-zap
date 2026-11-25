@@ -40,7 +40,7 @@ import (
 )
 
 // Chave pública da Lumnia para as regras. A privada fica fora do repositório.
-const beatitudeRegrasChavePublica = "D3X5zYTilWSiRFBIhbQLfdA3CXjd6Cn50oKOvOggMC4="
+const beatitudeRegrasChavePublica = "jLsYXoQ3EkISBnWbLXfSAQavlcz5/FKM9jwpCEBDgd4="
 
 const (
 	beatitudeRegrasURL      = "https://raw.githubusercontent.com/lumnia-dev-ia/lumnia-zap/main/regras/mordomo.json"

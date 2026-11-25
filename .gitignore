@@ -36,3 +36,6 @@ whatsapp-bridge/whatsapp-client
 
 # chave privada das regras do mordomo: nunca no repositório
 *.key
+
+# binário do assinador (go build em regras/assinar)
+regras/assinar/lumnia-regras-assinar

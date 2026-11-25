@@ -111,12 +111,33 @@ func TestXisNoCartaoCancela(t *testing.T) {
 }
 
 func TestJoinhaRespeitaOHorario(t *testing.T) {
-	quando := time.Now().In(panelLoc).Add(3 * time.Hour)
+	// em cima da hora (até 5 min) o cartão ainda pede o sim
+	quando := time.Now().In(panelLoc).Add(3 * time.Minute).Truncate(time.Minute).Add(time.Minute)
 	g, envios, fim := cartaoComJoinha(t, 1, `,"enviar_em":"`+quando.Format("2006-01-02 15:04")+`"`, "às "+quando.Format("15:04")+" manda")
 	defer fim()
 	linhas := strings.Join(beatitudeAoReagir("R1", g.ids[0], "👍", time.Now()), "\n")
 	if !strings.Contains(linhas, "aprovado, sai") || len(*envios) != 0 {
 		t.Fatalf("com horário, 👍 agenda e não envia agora: %q %+v", linhas, *envios)
+	}
+}
+
+// 👍 numa mensagem já programada não faz nada; ❌ cancela, mesmo com lista mais nova.
+func TestReacoesNaProgramada(t *testing.T) {
+	quando := time.Now().In(panelLoc).Add(3 * time.Hour)
+	g, envios, fim := cartaoComJoinha(t, 1, `,"enviar_em":"`+quando.Format("2006-01-02 15:04")+`"`, "às "+quando.Format("15:04")+" manda")
+	defer fim()
+	if l := beatitudeAoReagir("R1", g.ids[0], "👍", time.Now()); len(l) != 0 || len(*envios) != 0 {
+		t.Fatalf("👍 na programada não faz nada: %q %+v", l, *envios)
+	}
+	time.Sleep(2 * time.Millisecond)
+	desde := time.Now()
+	_, cartao := beatitudeSepararRascunhos(rascunhosDe(1, ""), "1203@g.us", "responde")
+	beatitudeEnviarCartoes(cartao, desde)
+	l := strings.Join(beatitudeAoReagir("R2", g.ids[0], "❌", time.Now()), "\n")
+	var ligado int
+	_ = panel.store.db.QueryRow(`SELECT enabled FROM panel_schedules`).Scan(&ligado)
+	if !strings.Contains(l, "cancelado") || ligado != 0 {
+		t.Fatalf("❌ no cartão antigo cancela a programada: %q ligado=%d", l, ligado)
 	}
 }
 

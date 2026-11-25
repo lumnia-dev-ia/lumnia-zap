@@ -79,12 +79,8 @@ func TestRascunhoComAnexoAgendadoSaiComArquivo(t *testing.T) {
 	resp := `Vai para a Cris, com o comparativo. <rascunhos>[{"n":1,"chat_jid":"5511888880000@s.whatsapp.net","texto":"Oi, segue o comparativo","enviar_em":"` +
 		quando.Format("2006-01-02 15:04") + `","anexo":"A1"}]</rascunhos>`
 	_, ponte := beatitudeSepararRascunhos(resp, grupo, "às "+quando.Format("15:04")+" manda o PDF", anexos...)
-	if !strings.Contains(ponte, "com o arquivo *comparativo-formacao.pdf*") || !strings.Contains(ponte, "sai *") {
+	if !strings.Contains(ponte, "com o arquivo *comparativo-formacao.pdf*") || !strings.Contains(ponte, "programada para *") {
 		t.Fatalf("o cartão deveria mostrar horário e arquivo: %q", ponte)
-	}
-	linhas := strings.Join(beatitudeComando("sim", time.Now()), "\n")
-	if !strings.Contains(linhas, "aprovado, sai") {
-		t.Fatalf("sim deveria agendar: %q", linhas)
 	}
 	if len(*envios) != 0 {
 		t.Fatal("nada sai antes da hora")

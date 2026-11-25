@@ -158,7 +158,9 @@ func beatitudeLoteDesde(desde time.Time) (int64, []int) {
 	if lote == 0 {
 		return 0, nil
 	}
-	rows, err := panel.store.db.Query(`SELECT n FROM beatitude_rascunhos WHERE lote = ? ORDER BY n`, lote)
+	// so os que esperam o sim: os ja programados (25-11) nao vao a enquete
+	rows, err := panel.store.db.Query(`SELECT n FROM beatitude_rascunhos WHERE lote = ?
+		AND agendamento_id IS NULL AND enviado_em IS NULL AND cancelado_em IS NULL ORDER BY n`, lote)
 	if err != nil {
 		return lote, nil
 	}
@@ -183,7 +185,7 @@ func beatitudeOpcoesEnquete(lote int64, numeros []int) []string {
 		r, err := beatitudeLerRascunho(`lote = ? AND n = ?`, lote, n)
 		nome := "?"
 		if err == nil {
-			nome, _ = beatitudeNomeDoChat(r.jid)
+			nome = beatitudeNomeDestino(r.jid)
 		}
 		op := fmt.Sprintf("%d · %s", n, nome)
 		if err == nil && r.enviarEm != nil {
@@ -294,6 +296,21 @@ func beatitudeAoReagir(reacaoID, alvo, emoji string, hora time.Time) []string {
 	if !ok {
 		return nil // reação em mensagem que não é cartão
 	}
+	// ❌ num cartão com mensagem programada cancela a qualquer hora, mesmo
+	// que já exista lista mais nova: é por ele que ela desiste (25-11).
+	if beatitudeEhCancelaReacao(emoji) && c.tipo == "cartao" {
+		var linhas []string
+		for _, n := range c.numeros {
+			r, err := beatitudeLerRascunho(`lote = ? AND n = ?`, c.lote, n)
+			if err != nil || r.agendamento == nil || r.enviado != nil || r.cancelado != nil {
+				continue
+			}
+			linhas = append(linhas, beatitudeSemMarca(beatitudeComando("cancela "+strconv.Itoa(n), time.Now()))...)
+		}
+		if len(linhas) > 0 {
+			return linhas
+		}
+	}
 	if hora.Sub(c.criadoEm) > beatitudeJanelaResposta {
 		return []string{"essa lista é de mais de 2 horas atrás. Peça de novo, que eu refaço."}
 	}
@@ -313,12 +330,25 @@ func beatitudeAoReagir(reacaoID, alvo, emoji string, hora time.Time) []string {
 		return linhas
 	}
 	alvos := c.numeros
+	if c.tipo == "cartao" { // 👍 vale para o que ainda espera o sim; programada já está resolvida
+		var esperando []int
+		for _, n := range c.numeros {
+			if r, err := beatitudeLerRascunho(`lote = ? AND n = ?`, c.lote, n); err == nil && r.agendamento != nil {
+				continue
+			}
+			esperando = append(esperando, n)
+		}
+		if len(esperando) == 0 {
+			return nil
+		}
+		alvos = esperando
+	}
 	if c.tipo == "enquete" {
 		if len(c.selecao) == 0 {
 			return []string{"nada marcado na enquete. Marque os que devem sair e confirme com 👍 nela."}
 		}
 		alvos = c.selecao
-	} else if len(c.numeros) >= beatitudeEnqueteMinimo || beatitudeCartaoComEnquete(c.lote) {
+	} else if len(alvos) >= beatitudeEnqueteMinimo || beatitudeCartaoComEnquete(c.lote) {
 		return []string{"com tantos rascunhos, marque na enquete os que devem sair e confirme com 👍 nela."}
 	}
 	return beatitudeComando("envia "+beatitudeListaNumeros(alvos), time.Now())

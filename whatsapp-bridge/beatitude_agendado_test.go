@@ -77,7 +77,8 @@ func TestClassificarHorario(t *testing.T) {
 	}
 }
 
-func TestRascunhoComHorarioAprovaEAgenda(t *testing.T) {
+// Desde 25-11: horário a mais de 5 minutos já nasce programado, sem o sim.
+func TestRascunhoComHorarioJaNasceProgramado(t *testing.T) {
 	defer storeAgendado(t)()
 	agora := time.Now().In(panelLoc)
 	quando := agora.Add(3 * time.Hour).Truncate(time.Minute)
@@ -87,16 +88,14 @@ func TestRascunhoComHorarioAprovaEAgenda(t *testing.T) {
 	if visivel != "Vai para a Marina." {
 		t.Fatalf("visivel: %q", visivel)
 	}
-	if !strings.Contains(ponte, "sai *") || !strings.Contains(ponte, quando.Format("15:04")) || !strings.Contains(ponte, "não antes") {
-		t.Fatalf("a ponte deveria mostrar o horário: %q", ponte)
+	if !strings.Contains(ponte, "programada para *") || !strings.Contains(ponte, quando.Format("15:04")) ||
+		!strings.Contains(ponte, "Giulia") || !strings.Contains(ponte, "*cancela 1*") || strings.Contains(ponte, "Para aprovar") {
+		t.Fatalf("a ponte deveria mostrar texto, horário e como desistir, sem pedir o sim: %q", ponte)
 	}
-	if !beatitudeEhComando("sim") {
-		t.Fatal("sim deveria ser comando com um rascunho pendente")
+	if beatitudeEhComando("sim") {
+		t.Fatal("não há o que aprovar: sim segue para o Claude como conversa")
 	}
-	linhas := strings.Join(beatitudeComando("sim", time.Now()), "\n")
-	if !strings.Contains(linhas, "aprovado, sai") {
-		t.Fatalf("sim deveria aprovar e agendar: %q", linhas)
-	}
+	var linhas string
 	var onDate, atTime, msg string
 	var enabled int
 	if err := panel.store.db.QueryRow(`SELECT on_date, at_time, message, enabled FROM panel_schedules`).Scan(&onDate, &atTime, &msg, &enabled); err != nil {
@@ -110,7 +109,7 @@ func TestRascunhoComHorarioAprovaEAgenda(t *testing.T) {
 	if enviado != nil {
 		t.Fatal("não pode ter enviado na hora")
 	}
-	// depois de aprovado, "sim" de novo nao reenvia nem duplica
+	// programado nao e pendente
 	if beatitudePendentes(beatitudeJanelaResposta) != 0 {
 		t.Fatal("agendado não é mais pendente")
 	}
@@ -246,5 +245,28 @@ func TestEnviosDoGrupoNaoContamNoTetoDoPainel(t *testing.T) {
 	recordAPISend("5511999990000@s.whatsapp.net", "beatitude-aprovado")
 	if n := apiSendsSince(time.Now().Add(-time.Hour)); n != 1 {
 		t.Fatalf("só o envio a terceiro conta: %d", n)
+	}
+}
+
+// Com 5 minutos ou menos não dá tempo de desfazer: segue pedindo o sim.
+func TestHorarioEmCimaDaHoraAindaPedeSim(t *testing.T) {
+	defer storeAgendado(t)()
+	quando := time.Now().In(panelLoc).Add(3 * time.Minute).Truncate(time.Minute).Add(time.Minute)
+	resp := `<rascunhos>[{"n":1,"chat_jid":"5511999990000@s.whatsapp.net","texto":"Oi Marina","enviar_em":"` +
+		quando.Format("2006-01-02 15:04") + `"}]</rascunhos>`
+	_, ponte := beatitudeSepararRascunhos(resp, "1203@g.us", "às "+quando.Format("15:04")+" manda")
+	if !strings.Contains(ponte, "sai *") || !strings.Contains(ponte, "não antes") || strings.Contains(ponte, "programada") {
+		t.Fatalf("em cima da hora o cartão pede o sim: %q", ponte)
+	}
+	var n int
+	_ = panel.store.db.QueryRow(`SELECT COUNT(*) FROM panel_schedules`).Scan(&n)
+	if n != 0 {
+		t.Fatal("nada agendado antes do sim")
+	}
+	if !beatitudeEhComando("sim") {
+		t.Fatal("sim deveria ser comando com um rascunho pendente")
+	}
+	if l := strings.Join(beatitudeComando("sim", time.Now()), "\n"); !strings.Contains(l, "aprovado, sai") {
+		t.Fatalf("sim deveria aprovar e agendar: %q", l)
 	}
 }

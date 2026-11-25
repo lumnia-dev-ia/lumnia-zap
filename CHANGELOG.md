@@ -1,5 +1,38 @@
 # Mudanças
 
+## Próxima versão — mordomo: mensagem programada sem "sim"
+
+Vem das reclamações de 24/11 no grupo: o pedido de mensagem voltava com a
+descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
+
+**Programada sai sem o "sim"**
+- Mensagem pedida para um horário a mais de 5 minutos de distância já nasce
+  programada: a ponte agenda na hora e mostra o cartão com destinatário,
+  horário e texto. Para mudar: *envia N: novo texto* (mantém o horário). Para
+  desistir: *cancela N* ou ❌ no cartão, a qualquer hora.
+- Continuam pedindo o *sim*: envio imediato, horário em até 5 minutos e número
+  sem conversa anterior.
+
+**Uma mensagem só, com o texto**
+- Resposta do mordomo e cartão da ponte saem juntos. O mordomo só escreve
+  quando há algo que o cartão não mostra (qual contato escolheu, um alerta).
+- Rascunho descartado deixa de ser silencioso: destino que não existe, bloco
+  com defeito ou resposta que cita um rascunho sem trazê-lo viram um aviso de
+  que nada foi preparado.
+- Número sem conversa anterior (contato encaminhado, número ditado) passa a
+  ser aceito quando o WhatsApp confirma o número; o cartão mostra o telefone
+  e espera o *sim*.
+- Conversa sem nome mostra o nome da agenda de contatos ou o telefone legível
+  ("+55 11 95038-0882"), não mais "5511950380882".
+- A marca "◆ Beatitude" não sai mais repetida.
+
+**Números que não se repetem**
+- As programadas em aberto reservam seus números; o pedido seguinte continua
+  a contagem (antes todo rascunho era o 1 e *cancela 1* só alcançava o último).
+- *programadas* (ou *agendadas*) lista no grupo o que vai sair, sem chamar o
+  Claude.
+- "SIM, enviar amanhã, 8h" e parecidos valem como *sim*.
+
 ## 1.1.4 — 24 de novembro de 2026
 
 **O WhatsApp voltou a aceitar a conexão**

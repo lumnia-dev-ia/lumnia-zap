@@ -6,6 +6,9 @@ package main
 // beatitude_extras.go — icone do grupo, voz (transcricao local) e envio com
 // aprovacao explicita ("envia 1").
 //
+// Desde 25-11, mensagem com horario a mais de 5 minutos ja nasce programada
+// (beatitudeFolgaSemSim); o resto abaixo vale para o que espera o sim.
+//
 // Envio com aprovacao: o Claude continua SEM ferramenta de envio. Ele devolve
 // os rascunhos num bloco <rascunhos>; a ponte confere cada destino no banco
 // local, mostra no grupo o NOME REAL da conversa e o texto exato, e so envia
@@ -277,36 +280,103 @@ func beatitudeClassificarHorario(enviarEm string, pedidoComHorario bool, agora t
 	return time.Time{}, false, ""
 }
 
-// beatitudeSepararRascunhos tira o bloco da resposta do Claude, confere cada
-// destino e grava os validos num lote novo. Devolve o texto visivel e o
-// trecho que a PONTE escreve (nome real da conversa + texto exato + horario).
+// Mensagem programada sem "sim" (25-11). O que ela pede para um horario a
+// mais de beatitudeFolgaSemSim de distancia ja nasce programado: a ponte
+// agenda na hora e mostra o cartao com o texto. Ela muda com "envia N: texto"
+// e desiste com "cancela N" ou ❌. Com menos folga que isso nao da tempo de
+// desfazer, entao segue pedindo o sim; envio imediato tambem.
+const beatitudeFolgaSemSim = 5 * time.Minute
+
+// beatitudeRascunhosInfo: o que a ponte fez com o bloco de rascunhos.
+type beatitudeRascunhosInfo struct {
+	Visivel     string // texto do mordomo, sem o bloco e sem a marca repetida
+	Cartao      string // o que a PONTE escreve: nome real, horario, texto e como mudar
+	Programados int    // ja agendados, saem sozinhos no horario
+	Pendentes   int    // esperam o sim (ou "agora", ou um horario)
+	Resumo      string // uma linha por mensagem, SEM o texto (vai ao app)
+}
+
+// beatitudeSepararRascunhos: forma curta, usada onde so o texto importa.
 func beatitudeSepararRascunhos(resposta, grupo, pedido string, anexos ...beatitudeAnexo) (string, string) {
+	info := beatitudeTratarRascunhos(resposta, grupo, pedido, anexos...)
+	return info.Visivel, info.Cartao
+}
+
+var (
+	// o mordomo imita o historico do grupo e comeca a resposta com a marca
+	beatitudeMarcaNoInicioRe = regexp.MustCompile(`^(?:\s*◆\s*Beatitude\s*:?\s*)+`)
+	// resposta que fala de um rascunho sem trazer o bloco: nada foi montado
+	beatitudePrometeRascunhoRe = regexp.MustCompile(`(?i)\brascunho\b|aprovar o envio|\bprogramei\b|ficou programad|deixei programad`)
+	beatitudeFalaDeAcaoRe      = regexp.MustCompile(`(?i)\bação \*?\d|\bsim \*?\d`)
+)
+
+func beatitudeTirarMarca(s string) string {
+	return strings.TrimSpace(beatitudeMarcaNoInicioRe.ReplaceAllString(s, ""))
+}
+
+const (
+	beatitudeAvisoSemBloco   = "O texto da mensagem não veio nesta resposta, então *nada foi preparado nem programado*. Peça de novo."
+	beatitudeAvisoBlocoRuim  = "O texto da mensagem veio com defeito e eu descartei: *nada foi preparado nem programado*. Peça de novo."
+	beatitudeAvisoSemDestino = "Não achei no WhatsApp a conversa nem o número de %s, então *nada foi preparado para esse destino*. Diga o número com DDD ou encaminhe o contato para este grupo e peça de novo."
+)
+
+// beatitudeTratarRascunhos tira o bloco da resposta do Claude, confere cada
+// destino, grava os validos num lote novo e ja agenda os que tem horario com
+// folga. Nunca fica calado: rascunho descartado vira aviso no cartao.
+func beatitudeTratarRascunhos(resposta, grupo, pedido string, anexos ...beatitudeAnexo) beatitudeRascunhosInfo {
 	m := beatitudeBlocoRe.FindStringSubmatch(resposta)
-	visivel := strings.TrimSpace(beatitudeBlocoRe.ReplaceAllString(resposta, ""))
+	info := beatitudeRascunhosInfo{Visivel: beatitudeTirarMarca(beatitudeBlocoRe.ReplaceAllString(resposta, ""))}
 	if m == nil {
-		return visivel, ""
+		if beatitudePrometeRascunhoRe.MatchString(info.Visivel) && !beatitudeFalaDeAcaoRe.MatchString(info.Visivel) {
+			info.Cartao = beatitudeAvisoSemBloco
+		}
+		return info
 	}
 	var lista []beatitudeRascunho
 	if err := json.Unmarshal([]byte(m[1]), &lista); err != nil || len(lista) == 0 {
-		return visivel, ""
+		info.Cartao = beatitudeAvisoBlocoRuim
+		return info
 	}
 	agora := time.Now()
 	comHorario := beatitudePedidoTemHorario(pedido)
 	lote := agora.UnixNano()
+
+	// Numeracao continua: os numeros das programadas em aberto ficam
+	// reservados, para "cancela 3" valer sempre para uma mensagem so. Se o
+	// mordomo numerou por cima deles, a ponte desloca o lote inteiro.
+	desloca := 0
+	if maior := beatitudeMaiorNumeroAberto(agora); maior > 0 {
+		menor := 0
+		for _, r := range lista {
+			if r.N > 0 && (menor == 0 || r.N < menor) {
+				menor = r.N
+			}
+		}
+		if menor > 0 && menor <= maior {
+			desloca = maior - menor + 1
+		}
+	}
+
 	var b strings.Builder
-	validos, agendados, travados := 0, 0, 0
-	var semArquivo []string // anexo citado que nao esta na lista: o rascunho cai
+	var resumo []string
+	var pendentes, programados []int
+	agendados, travados := 0, 0
+	var semArquivo, semDestino []string // rascunhos que cairam, com o motivo dito no cartao
 	var unicoQuando time.Time
 	for _, r := range lista {
 		texto := strings.TrimSpace(r.Texto)
 		if r.N <= 0 || texto == "" || len([]rune(texto)) > 4000 || r.ChatJID == grupo {
 			continue
 		}
-		nome, existe := beatitudeNomeDoChat(r.ChatJID)
-		if !existe { // destino inventado ou desconhecido: descarta
+		jid, semConversa, ok := beatitudeResolverDestino(r.ChatJID)
+		if !ok { // destino inventado ou desconhecido: cai, e o cartao diz
+			semDestino = append(semDestino, beatitudeRotuloDestino(r.ChatJID))
 			continue
 		}
+		nome := beatitudeNomeDestino(jid)
+		n := r.N + desloca
 		var anexoID, anexoNome interface{}
+		var anexoMsgID, anexoTxt string
 		if strings.TrimSpace(r.Anexo) != "" {
 			a, ok := beatitudeAcharAnexo(anexos, r.Anexo)
 			if !ok { // codigo inventado: nao manda o texto prometendo um arquivo que nao vai
@@ -314,72 +384,126 @@ func beatitudeSepararRascunhos(resposta, grupo, pedido string, anexos ...beatitu
 				continue
 			}
 			anexoID, anexoNome = a.MsgID, a.Nome
+			anexoMsgID, anexoTxt = a.MsgID, a.Nome
 		}
 		quando, soAgora, motivo := beatitudeClassificarHorario(r.EnviarEm, comHorario, agora)
 		var enviarEm interface{}
 		if !quando.IsZero() {
 			enviarEm = quando
 		}
-		_, err := panel.store.db.Exec(
+		res, err := panel.store.db.Exec(
 			`INSERT INTO beatitude_rascunhos (lote, n, chat_jid, texto, criado_em, enviar_em, so_agora, anexo_msg_id, anexo_nome)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			lote, r.N, r.ChatJID, texto, agora, enviarEm, soAgora, anexoID, anexoNome)
+			lote, n, jid, texto, agora, enviarEm, soAgora, anexoID, anexoNome)
 		if err != nil {
 			continue
 		}
-		validos++
-		cab := fmt.Sprintf("*%d · %s*", r.N, nome)
+		id, _ := res.LastInsertId()
+
+		// Horario com folga, conversa conhecida: ja fica programada. Numero
+		// sem conversa anterior nunca sai sem o sim (pode ser numero errado).
+		programada := false
+		if !quando.IsZero() && quando.Sub(agora) > beatitudeFolgaSemSim && !semConversa {
+			linha := beatitudeRascunhoLinha{id: id, n: n, jid: jid, texto: texto, enviarEm: &quando,
+				anexoMsgID: anexoMsgID, anexoNome: anexoTxt}
+			if caminho, cerr := beatitudeCaminhoDoRascunho(linha); cerr == nil {
+				if ag, aerr := beatitudeAgendar(linha, nome, texto, caminho); aerr == nil {
+					_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET agendamento_id = ? WHERE id = ?`, ag, id)
+					beatitudeRegistrar(agora, "programa "+strconv.Itoa(n), "programado para "+nome+" em "+quando.In(panelLoc).Format("02/01 15:04"), "agendado", "")
+					programada = true
+				}
+			}
+		}
+
+		cab := fmt.Sprintf("*%d · %s*", n, nome)
+		linhaResumo := "Mensagem para " + nome
+		if semConversa {
+			cab += " · número sem conversa anterior"
+		}
 		switch {
+		case programada:
+			programados = append(programados, n)
+			cab += " · programada para *" + beatitudeQuando(quando, agora) + "*"
+			linhaResumo += " programada para " + beatitudeQuando(quando, agora)
 		case !quando.IsZero():
+			pendentes = append(pendentes, n)
 			agendados++
 			unicoQuando = quando
 			cab += " · sai *" + beatitudeQuando(quando, agora) + "*"
+			linhaResumo += " para " + beatitudeQuando(quando, agora) + ", esperando o seu sim"
 		case soAgora:
+			pendentes = append(pendentes, n)
 			travados++
 			cab += " · " + motivo
+			linhaResumo += " sem horário para sair"
+		default:
+			pendentes = append(pendentes, n)
+			linhaResumo += " esperando o seu sim"
 		}
 		if anexoNome != nil {
-			cab += " · com o arquivo *" + anexoNome.(string) + "*"
+			cab += " · com o arquivo *" + anexoTxt + "*"
 		}
 		fmt.Fprintf(&b, "%s\n%s\n\n", cab, texto)
-	}
-	avisoArquivo := ""
-	if len(semArquivo) > 0 {
-		avisoArquivo = "Não achei o arquivo para " + strings.Join(semArquivo, ", ") +
-			". Mande ou encaminhe o arquivo para este grupo e repita o pedido."
-	}
-	if validos == 0 {
-		return visivel, avisoArquivo
+		resumo = append(resumo, linhaResumo+".")
 	}
 
+	var avisos []string
+	if len(semDestino) > 0 {
+		avisos = append(avisos, fmt.Sprintf(beatitudeAvisoSemDestino, strings.Join(semDestino, ", ")))
+	}
+	if len(semArquivo) > 0 {
+		avisos = append(avisos, "Não achei o arquivo para "+strings.Join(semArquivo, ", ")+
+			". Mande ou encaminhe o arquivo para este grupo e repita o pedido.")
+	}
+	info.Programados, info.Pendentes = len(programados), len(pendentes)
+	info.Resumo = strings.Join(append(resumo, avisos...), "\n")
+	if info.Programados+info.Pendentes == 0 {
+		if len(avisos) == 0 { // o bloco veio, mas nenhum item servia
+			avisos = []string{beatitudeAvisoBlocoRuim}
+			info.Resumo = beatitudeAvisoBlocoRuim
+		}
+		info.Cartao = strings.Join(avisos, "\n")
+		return info
+	}
+
+	var rodape []string
 	switch {
-	case validos == 1 && agendados == 1:
-		b.WriteString("Para aprovar, responda *sim* (ou *1*) ou reaja com 👍: sai " + beatitudeQuando(unicoQuando, agora) + ", não antes. Para mudar o texto: *envia 1: seu texto*. ❌ cancela. Nada sai sem isso.")
-	case validos == 1 && travados == 1:
-		b.WriteString("Você citou um horário e este rascunho não tem horário para sair, então o *sim* não envia. Diga o horário (ex.: *às 8h30*), ou responda *agora* para enviar já.")
-	case validos == 1:
-		b.WriteString("Para enviar, responda *sim* (ou *1*) ou reaja com 👍. Para mudar o texto: *envia 1: seu texto*. ❌ cancela. Nada sai sem isso.")
-	case validos >= beatitudeEnqueteMinimo:
-		b.WriteString("Marque na enquete abaixo os que devem sair e confirme com 👍 nela (ou escreva *envia*). Também vale responder com os números: *1 e 3* ou *todos*. Para mudar o texto: *envia 2: seu texto*. Nada sai sem isso.")
-		if agendados > 0 {
-			b.WriteString("\nOs que têm horário só saem no horário.")
-		}
-		if travados > 0 {
-			b.WriteString("\nOs marcados \"sem horário marcado\" ou com horário que passou não saem assim: diga o horário, ou responda *2 agora* para enviar já.")
-		}
-	default:
-		b.WriteString("Para aprovar, responda com o número: *1*, *1 e 3* ou *todos*, ou reaja com 👍 para aprovar todos deste cartão. Para mudar o texto: *envia 2: seu texto*. Nada sai sem isso.")
-		if agendados > 0 {
-			b.WriteString("\nOs que têm horário só saem no horário.")
-		}
-		if travados > 0 {
-			b.WriteString("\nOs marcados \"sem horário marcado\" ou com horário que passou não saem com o número: diga o horário, ou responda *2 agora* para enviar já.")
+	case len(programados) == 1:
+		p := strconv.Itoa(programados[0])
+		rodape = append(rodape, "Já está programada e sai sozinha no horário. Para mudar o texto: *envia "+p+": seu texto*. Para desistir: *cancela "+p+"* ou ❌.")
+	case len(programados) > 1:
+		p := strconv.Itoa(programados[0])
+		rodape = append(rodape, "As programadas saem sozinhas no horário. Para mudar um texto: *envia "+p+": seu texto*. Para desistir: *cancela "+p+"*. Para ver todas: *programadas*.")
+	}
+	if len(pendentes) > 0 {
+		p := strconv.Itoa(pendentes[0])
+		so := len(pendentes) == 1
+		switch {
+		case so && agendados == 1:
+			rodape = append(rodape, "Para aprovar, responda *sim* (ou *"+p+"*) ou reaja com 👍: sai "+beatitudeQuando(unicoQuando, agora)+", não antes. Para mudar o texto: *envia "+p+": seu texto*. ❌ cancela. Nada sai sem isso.")
+		case so && travados == 1:
+			rodape = append(rodape, "Você citou um horário e este rascunho não tem horário para sair, então o *sim* não envia. Diga o horário (ex.: *às 8h30*), ou responda *agora* para enviar já.")
+		case so:
+			rodape = append(rodape, "Para enviar, responda *sim* (ou *"+p+"*) ou reaja com 👍. Para mudar o texto: *envia "+p+": seu texto*. ❌ cancela. Nada sai sem isso.")
+		default:
+			if len(pendentes) >= beatitudeEnqueteMinimo {
+				rodape = append(rodape, "Marque na enquete abaixo os que devem sair e confirme com 👍 nela (ou escreva *envia*). Também vale responder com os números: *"+p+"* ou *todos*. Para mudar o texto: *envia "+p+": seu texto*. Nada sai sem isso.")
+			} else if len(programados) > 0 {
+				rodape = append(rodape, "Os outros esperam o seu sim: responda com o número (*"+p+"*) ou *todos*. Para mudar o texto: *envia "+p+": seu texto*.")
+			} else {
+				rodape = append(rodape, "Para aprovar, responda com o número: *"+p+"*, *"+p+" e "+strconv.Itoa(pendentes[1])+"* ou *todos*, ou reaja com 👍 para aprovar todos deste cartão. Para mudar o texto: *envia "+p+": seu texto*. Nada sai sem isso.")
+			}
+			if agendados > 0 {
+				rodape = append(rodape, "Os que têm horário só saem no horário.")
+			}
+			if travados > 0 {
+				rodape = append(rodape, "Os marcados \"sem horário marcado\" ou com horário que passou não saem com o número: diga o horário, ou responda *"+p+" agora* para enviar já.")
+			}
 		}
 	}
-	if avisoArquivo != "" {
-		b.WriteString("\n" + avisoArquivo)
-	}
-	return visivel, strings.TrimSpace(b.String())
+	b.WriteString(strings.Join(append(rodape, avisos...), "\n"))
+	info.Cartao = strings.TrimSpace(b.String())
+	return info
 }
 
 func beatitudeNomeDoChat(jid string) (string, bool) {
@@ -397,12 +521,254 @@ func beatitudeNomeDoChat(jid string) (string, bool) {
 	return nome, true
 }
 
+// ---------------------------------------------------------------- destino
+//
+// Tres ganchos, trocados nos testes: a agenda de contatos do WhatsApp, o
+// outro identificador da mesma pessoa (telefone <-> LID) e a consulta ao
+// WhatsApp sobre um numero.
+
+var beatitudeContatoNome = func(jid string) string {
+	if panel.client == nil || panel.client.Store == nil || panel.client.Store.Contacts == nil {
+		return ""
+	}
+	j, err := types.ParseJID(jid)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := panel.client.Store.Contacts.GetContact(ctx, j)
+	if err != nil || !c.Found {
+		return ""
+	}
+	for _, n := range []string{c.FullName, c.FirstName, c.BusinessName, c.PushName} {
+		if n = strings.TrimSpace(n); n != "" {
+			return n
+		}
+	}
+	return ""
+}
+
+var beatitudeJIDAlternativo = func(jid string) string {
+	if panel.client == nil || panel.client.Store == nil {
+		return ""
+	}
+	j, err := types.ParseJID(jid)
+	if err != nil {
+		return ""
+	}
+	alt, err := panel.client.Store.GetAltJID(context.Background(), j)
+	if err != nil || alt.IsEmpty() {
+		return ""
+	}
+	return alt.String()
+}
+
+var beatitudeNumeroNoWhatsApp = func(tel string) (string, error) {
+	if panel.client == nil {
+		return "", fmt.Errorf("sem conexão")
+	}
+	return ponteJIDDoTelefone(tel)
+}
+
+// beatitudeTelefoneDoJID: os digitos, so para JID de telefone bem formado.
+func beatitudeTelefoneDoJID(jid string) string {
+	partes := strings.SplitN(jid, "@", 2)
+	if len(partes) != 2 || partes[1] != types.DefaultUserServer || len(partes[0]) < 10 || len(partes[0]) > 15 {
+		return ""
+	}
+	for _, c := range partes[0] {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return partes[0]
+}
+
+// beatitudeResolverDestino confere o destino de um rascunho. Aceita a
+// conversa que esta no banco (pelo JID dado ou pelo outro identificador da
+// mesma pessoa) e, desde 25-11, um telefone que o WhatsApp confirma mesmo
+// sem conversa anterior (contato encaminhado, numero ditado): esse volta
+// com semConversa, e o chamador nunca o envia sem o sim.
+func beatitudeResolverDestino(jid string) (final string, semConversa, ok bool) {
+	jid = strings.TrimSpace(jid)
+	if _, existe := beatitudeNomeDoChat(jid); existe {
+		return jid, false, true
+	}
+	if !strings.Contains(jid, "@") || strings.HasSuffix(jid, "@g.us") {
+		return "", false, false
+	}
+	if alt := beatitudeJIDAlternativo(jid); alt != "" {
+		if _, existe := beatitudeNomeDoChat(alt); existe {
+			return alt, false, true
+		}
+	}
+	tel := beatitudeTelefoneDoJID(jid)
+	if tel == "" {
+		return "", false, false
+	}
+	certo, err := beatitudeNumeroNoWhatsApp(tel)
+	if err != nil || certo == "" {
+		return "", false, false
+	}
+	if _, existe := beatitudeNomeDoChat(certo); existe { // o WhatsApp devolveu o JID de uma conversa conhecida
+		return certo, false, true
+	}
+	return certo, true, true
+}
+
+// beatitudeTelefoneLegivel: "5511950380882" -> "+55 11 95038-0882".
+func beatitudeTelefoneLegivel(tel string) string {
+	tel = strings.TrimLeft(tel, "+")
+	if strings.HasPrefix(tel, "55") && (len(tel) == 12 || len(tel) == 13) {
+		resto := tel[4:]
+		return "+55 " + tel[2:4] + " " + resto[:len(resto)-4] + "-" + resto[len(resto)-4:]
+	}
+	return "+" + tel
+}
+
+// beatitudeRotuloDestino: como citar no aviso um destino que caiu.
+func beatitudeRotuloDestino(jid string) string {
+	if tel := beatitudeTelefoneDoJID(jid); tel != "" {
+		return beatitudeTelefoneLegivel(tel)
+	}
+	if strings.TrimSpace(jid) == "" {
+		return "um destino sem identificação"
+	}
+	return "\"" + beatitudeCurto(jid, 40) + "\""
+}
+
+// beatitudeNomeDestino: o nome que aparece no cartao e nas confirmacoes.
+// Nome da conversa; sem ele, o nome na agenda de contatos; sem ele, o
+// telefone legivel (antes saia "5511950380882").
+func beatitudeNomeDestino(jid string) string {
+	bruto := strings.SplitN(jid, "@", 2)[0]
+	nome, _ := beatitudeNomeDoChat(jid)
+	if nome != "" && nome != bruto {
+		return nome
+	}
+	if n := beatitudeContatoNome(jid); n != "" {
+		return n
+	}
+	if alt := beatitudeJIDAlternativo(jid); alt != "" {
+		if n, _ := beatitudeNomeDoChat(alt); n != "" && n != strings.SplitN(alt, "@", 2)[0] {
+			return n
+		}
+		if n := beatitudeContatoNome(alt); n != "" {
+			return n
+		}
+		if tel := beatitudeTelefoneDoJID(alt); tel != "" {
+			return beatitudeTelefoneLegivel(tel)
+		}
+	}
+	if tel := beatitudeTelefoneDoJID(jid); tel != "" {
+		return beatitudeTelefoneLegivel(tel)
+	}
+	return bruto
+}
+
+// ---------------------------------------------------------------- programadas
+
+const beatitudeSQLProgramadaAberta = `agendamento_id IS NOT NULL AND enviado_em IS NULL AND cancelado_em IS NULL AND enviar_em >= ?`
+
+// beatitudeMaiorNumeroAberto: o maior numero entre as programadas que ainda
+// vao sair. Zero quando nao ha nenhuma (a numeracao volta ao 1).
+func beatitudeMaiorNumeroAberto(agora time.Time) int {
+	if panel.store == nil {
+		return 0
+	}
+	var n int
+	_ = panel.store.db.QueryRow(`SELECT COALESCE(MAX(n),0) FROM beatitude_rascunhos WHERE `+beatitudeSQLProgramadaAberta,
+		agora.Add(-time.Hour)).Scan(&n)
+	return n
+}
+
+// beatitudeProgramadasAbertas: as que ainda vao sair, pela ordem de saida.
+func beatitudeProgramadasAbertas(agora time.Time) []beatitudeRascunhoLinha {
+	if panel.store == nil {
+		return nil
+	}
+	rows, err := panel.store.db.Query(`SELECT id FROM beatitude_rascunhos WHERE `+beatitudeSQLProgramadaAberta+
+		` ORDER BY enviar_em, n`, agora.Add(-time.Hour))
+	if err != nil {
+		return nil
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	var out []beatitudeRascunhoLinha
+	for _, id := range ids {
+		if r, err := beatitudeLerRascunho(`id = ?`, id); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// "programadas", "agendadas", "quais as mensagens programadas?"
+var beatitudeProgramadasRe = regexp.MustCompile(`(?i)^\s*(?:(?:quais|ver|veja|lista|listar|mostra|mostrar|me\s+mostra)\s+)?(?:(?:as|minhas|são\s+as|sao\s+as)\s+)?(?:mensagens\s+)?(?:programadas|agendadas)\s*[?.!]?\s*$`)
+
+// beatitudeListarProgramadas responde "programadas" sem chamar o Claude.
+func beatitudeListarProgramadas(agora time.Time) []string {
+	abertas := beatitudeProgramadasAbertas(agora)
+	if len(abertas) == 0 {
+		return []string{beatitudeMarca + ": nenhuma mensagem programada por este grupo."}
+	}
+	linhas := []string{beatitudeMarca, "", "*Programadas*"}
+	for _, r := range abertas {
+		q := ""
+		if r.enviarEm != nil {
+			q = " · " + beatitudeQuando(*r.enviarEm, agora)
+		}
+		arq := ""
+		if r.anexoNome != "" {
+			arq = " · com " + r.anexoNome
+		}
+		linhas = append(linhas, fmt.Sprintf("*%d · %s*%s%s\n%s", r.n, beatitudeNomeDestino(r.jid), q, arq, beatitudeCurto(strings.ReplaceAll(r.texto, "\n", " "), 140)))
+	}
+	linhas = append(linhas, "", "Para mudar o texto: *envia N: seu texto*. Para desistir: *cancela N*. Para mandar já: *N agora*.")
+	return linhas
+}
+
+// beatitudeBlocoProgramadas entra no pedido ao Claude: ele nao cancela nem
+// muda nada, mas sabe dizer o numero certo a ela.
+func beatitudeBlocoProgramadas(agora time.Time) string {
+	abertas := beatitudeProgramadasAbertas(agora)
+	if len(abertas) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Mensagens já programadas por este grupo (a ponte envia sozinha no horário):\n")
+	maior := 0
+	for _, r := range abertas {
+		q := ""
+		if r.enviarEm != nil {
+			q = r.enviarEm.In(panelLoc).Format("02/01 15:04")
+		}
+		fmt.Fprintf(&b, "- %d · %s · %s · %s\n", r.n, beatitudeNomeDestino(r.jid), q, beatitudeCurto(strings.ReplaceAll(r.texto, "\n", " "), 100))
+		if r.n > maior {
+			maior = r.n
+		}
+	}
+	fmt.Fprintf(&b, "Esses números estão ocupados: numere os rascunhos novos a partir de %d. Para ela mudar ou desistir de uma programada, diga o comando (*envia N: novo texto*, *cancela N*); você não muda nem cancela.", maior+1)
+	return b.String()
+}
+
 var (
 	// "envia 1", "manda 1 e 3", "pode enviar todos", e tambem so "1", "1 e 3", "todos"
 	beatitudeEnviaRe      = regexp.MustCompile(`(?is)^\s*(?:(?:pode\s+)?(?:envi(?:a|ar|e)|mand(?:a|ar|e))\s+)?(todos|tudo|\d+(?:[\s,e]+\d+)*)\s*[.!]?\s*$`)
 	beatitudeEnviaTextoRe = regexp.MustCompile(`(?is)^\s*(?:envi(?:a|ar|e)|mand(?:a|ar|e))\s+(\d+)\s*:\s*(.+)$`)
 	// "sim", "pode", "ok", "pode enviar", "manda": so quando ha UM rascunho pendente
 	beatitudeSimRe = regexp.MustCompile(`(?is)^\s*(sim|s|ok|pode|pode\s+enviar|pode\s+mandar|envia|manda|enviar|mandar)\s*[.!]?\s*$`)
+	// "SIM, enviar amanha, 8h", "ok pode mandar", "sim, envia às 8h30": um sim
+	// seguido só de palavras de envio e de horário (25-11). "sim, mas troca o
+	// texto" não casa e segue para o Claude.
+	beatitudeSimLongoRe = regexp.MustCompile(`(?is)^\s*(?:sim|ok|pode)\b[\s,.;!-]*(?:(?:por\s+favor|pode|isso|ent[ãa]o|envi(?:a|ar|e)|mand(?:a|ar|e)|amanh[ãa]|hoje|cedo|de\s+manh[ãa]|(?:[àa]s\s+)?(?:[01]?\d|2[0-3])\s*(?:[:;.h]\s*[0-5]\d|h|\s*horas?)|[àa]s\s+(?:[01]?\d|2[0-3]))[\s,.;!-]*)*$`)
 	// "agora", "1 agora", "envia agora", "manda o 2 agora": envia ja, ignorando horario
 	beatitudeAgoraRe = regexp.MustCompile(`(?is)^\s*(?:(?:pode\s+)?(?:envi(?:a|ar|e)|mand(?:a|ar|e))\s+)?(?:o\s+)?(\d+)?\s*(?:já\s+|ja\s+)?agora\s*(?:mesmo)?\s*[.!]?\s*$`)
 	// "cancela", "cancela 1", "não envia", "nao manda o 2": desiste (tambem do agendado)
@@ -425,17 +791,22 @@ func beatitudeEhComando(texto string) bool {
 	if beatitudeAgoraRe.MatchString(texto) {
 		return beatitudePendentes(beatitudeJanelaResposta) > 0 || beatitudeAgendadosAbertos() > 0
 	}
-	if !beatitudeEnviaRe.MatchString(texto) && !beatitudeSimRe.MatchString(texto) {
+	if !beatitudeEnviaRe.MatchString(texto) && !beatitudeEhSim(texto) {
 		return false
 	}
 	if beatitudeEnviaRe.MatchString(texto) && regexp.MustCompile(`(?i)^\s*(pode\s+)?(envi|mand)`).MatchString(texto) {
 		return true // "envia 1" explicito: sempre comando (responde se nao houver rascunho)
 	}
 	pend := beatitudePendentes(beatitudeJanelaResposta)
-	if beatitudeSimRe.MatchString(texto) {
+	if !beatitudeEnviaRe.MatchString(texto) { // "sim" e parecidos: so com UM rascunho esperando
 		return pend == 1
 	}
 	return pend > 0
+}
+
+// beatitudeEhSim: "sim", "ok", "pode enviar" e o sim com horario junto.
+func beatitudeEhSim(texto string) bool {
+	return beatitudeSimRe.MatchString(texto) || beatitudeSimLongoRe.MatchString(texto)
 }
 
 // beatitudePendentes conta rascunhos do ultimo lote, dentro da janela, que
@@ -568,7 +939,7 @@ func beatitudeComando(texto string, agora time.Time) []string {
 		} else if alvos = unico(); alvos == nil {
 			return []string{beatitudeMarca + ": diga qual: *1 agora*, *2 agora*…"}
 		}
-	case beatitudeSimRe.MatchString(texto):
+	case beatitudeEhSim(texto) && !beatitudeEnviaRe.MatchString(texto) && !beatitudeEnviaTextoRe.MatchString(texto):
 		var n int
 		_ = panel.store.db.QueryRow(`SELECT n FROM beatitude_rascunhos WHERE lote = ? AND enviado_em IS NULL
 			AND agendamento_id IS NULL AND cancelado_em IS NULL ORDER BY n LIMIT 1`, ultimoLote).Scan(&n)
@@ -601,7 +972,7 @@ func beatitudeComando(texto string, agora time.Time) []string {
 			}
 		}
 	}
-	if ultimoLote == 0 && (len(alvos) == 0 || alvos[0].id == 0) {
+	if ultimoLote == 0 && (len(alvos) == 0 || alvos[0].id == 0) && beatitudeAgendadosAbertos() == 0 {
 		return []string{beatitudeMarca + ": não há rascunho esperando envio. Peça \"pendentes\" primeiro."}
 	}
 	if len(alvos) == 0 {
@@ -615,13 +986,13 @@ func beatitudeComando(texto string, agora time.Time) []string {
 		if a.id > 0 {
 			r, err = beatitudeLerRascunho(`id = ?`, a.id)
 		} else {
-			r, err = beatitudeLerRascunho(`lote = ? AND n = ?`, ultimoLote, a.n)
+			r, err = beatitudeAcharPorNumero(ultimoLote, a.n, agora)
 		}
 		if err != nil {
-			linhas = append(linhas, fmt.Sprintf("%d: não existe na última lista", a.n))
+			linhas = append(linhas, fmt.Sprintf("%d: não existe na última lista nem entre as programadas", a.n))
 			continue
 		}
-		nome, _ := beatitudeNomeDoChat(r.jid)
+		nome := beatitudeNomeDestino(r.jid)
 		rot := fmt.Sprintf("%d · %s", r.n, nome)
 		switch {
 		case r.enviado != nil:
@@ -647,13 +1018,28 @@ func beatitudeComando(texto string, agora time.Time) []string {
 			final = a.texto
 		}
 
-		// ja aprovado e esperando a hora: so "agora" ou "cancela" mexem nele
+		// programada e esperando a hora: "envia N: texto" troca o texto e
+		// mantem o horario; fora isso, so "agora" ou "cancela" mexem nela
+		if r.agendamento != nil && !modoAgora && a.texto != "" {
+			q := ""
+			if r.enviarEm != nil {
+				q = ", sai *" + beatitudeQuando(*r.enviarEm, agora) + "*"
+			}
+			if _, err := panel.store.db.Exec(`UPDATE panel_schedules SET message = ? WHERE id = ? AND enabled = 1`, final, *r.agendamento); err != nil {
+				linhas = append(linhas, rot+": não consegui trocar o texto ("+err.Error()+"). Segue o texto anterior.")
+				continue
+			}
+			_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET texto = ? WHERE id = ?`, final, r.id)
+			linhas = append(linhas, rot+": texto trocado"+q+".\n"+final)
+			beatitudeRegistrar(agora, "muda "+strconv.Itoa(r.n), "texto trocado para "+nome, "agendado", "")
+			continue
+		}
 		if r.agendamento != nil && !modoAgora {
 			q := ""
 			if r.enviarEm != nil {
 				q = " (" + beatitudeQuando(*r.enviarEm, agora) + ")"
 			}
-			linhas = append(linhas, rot+": já está aprovado e sai no horário"+q+". Para mandar já: *"+strconv.Itoa(r.n)+" agora*; para desistir: *cancela "+strconv.Itoa(r.n)+"*")
+			linhas = append(linhas, rot+": já está programada e sai no horário"+q+". Para mandar já: *"+strconv.Itoa(r.n)+" agora*; para desistir: *cancela "+strconv.Itoa(r.n)+"*")
 			continue
 		}
 
@@ -746,7 +1132,7 @@ func beatitudeAoRodarAgendamento(id int64, status string, quando time.Time) {
 	if err != nil {
 		return
 	}
-	nome, _ := beatitudeNomeDoChat(r.jid)
+	nome := beatitudeNomeDestino(r.jid)
 	hora := quando.In(panelLoc).Format("15:04")
 	if status == "enviada" {
 		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ? WHERE id = ?`, time.Now(), r.id)
@@ -779,4 +1165,18 @@ func beatitudeCaminhoDoRascunho(r beatitudeRascunhoLinha) (string, error) {
 	grupo := beatitude.cfg.GrupoJID
 	beatitude.mu.Unlock()
 	return beatitudeArquivoDoAnexo(r.anexoMsgID, grupo)
+}
+
+// beatitudeAcharPorNumero: o rascunho de numero n. Primeiro no ultimo lote;
+// se la nao existe ou ja foi resolvido, entre as programadas em aberto (os
+// numeros delas nao se repetem, ver beatitudeTratarRascunhos).
+func beatitudeAcharPorNumero(ultimoLote int64, n int, agora time.Time) (beatitudeRascunhoLinha, error) {
+	r, err := beatitudeLerRascunho(`lote = ? AND n = ?`, ultimoLote, n)
+	if err == nil && r.enviado == nil && r.cancelado == nil {
+		return r, nil
+	}
+	if p, perr := beatitudeLerRascunho(`n = ? AND `+beatitudeSQLProgramadaAberta+` ORDER BY id DESC LIMIT 1`, n, agora.Add(-time.Hour)); perr == nil {
+		return p, nil
+	}
+	return r, err
 }

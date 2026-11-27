@@ -55,6 +55,7 @@ func initBeatitudeBastao() {
 		registrado_em TIMESTAMP,
 		devolvido_em TIMESTAMP
 	);`)
+	initBeatitudeExecutor()
 }
 
 // beatitudeRegraBastao: a regra do prompt do mordomo (substitui, em 1.1.2,
@@ -101,31 +102,66 @@ func beatitudeAvisoBastao(codigo, porque string, comVolta bool) string {
 // o aviso (com marca), o texto a copiar (sem marca) e o código. Sem bloco
 // válido, aviso e texto vêm vazios.
 func beatitudeSepararBastao(resposta string) (visivel, aviso, copiar, codigo string) {
-	m := beatitudeBastaoBlocoRe.FindStringSubmatch(resposta)
-	visivel = strings.TrimSpace(beatitudeBastaoBlocoRe.ReplaceAllString(resposta, ""))
-	if m == nil || panel.store == nil {
+	visivel, b := beatitudeTirarBastao(resposta)
+	if b == nil {
 		return visivel, "", "", ""
+	}
+	aviso, copiar = b.ParaColar()
+	return visivel, aviso, copiar, b.Codigo
+}
+
+// beatitudeBastao: o pedido que saiu do bloco <bastao>, já gravado.
+type beatitudeBastao struct {
+	ID       int64
+	Codigo   string
+	Pedido   string
+	Porque   string
+	Anexos   []string // códigos da lista de anexos (A1, A2…), se o mordomo indicou
+	ComVolta bool     // ponte pareada: a resposta colada volta ao grupo
+}
+
+// ParaColar: o plano B. O aviso com a marca e o texto para copiar e colar
+// numa conversa do Claude.
+func (b beatitudeBastao) ParaColar() (aviso, copiar string) {
+	return beatitudeAvisoBastao(b.Codigo, b.Porque, b.ComVolta), beatitudeTextoBastao(b.Codigo, b.Pedido, b.ComVolta)
+}
+
+// beatitudeTirarBastao tira o bloco da resposta e grava o pedido. Quem
+// decide o caminho (executor ou colar) é quem chama.
+func beatitudeTirarBastao(resposta string) (string, *beatitudeBastao) {
+	m := beatitudeBastaoBlocoRe.FindStringSubmatch(resposta)
+	visivel := strings.TrimSpace(beatitudeBastaoBlocoRe.ReplaceAllString(resposta, ""))
+	if m == nil || panel.store == nil {
+		return visivel, nil
 	}
 	var p struct {
-		Pedido string `json:"pedido"`
-		Porque string `json:"porque"`
+		Pedido string   `json:"pedido"`
+		Porque string   `json:"porque"`
+		Anexos []string `json:"anexos"`
 	}
 	if json.Unmarshal([]byte(m[1]), &p) != nil || strings.TrimSpace(p.Pedido) == "" {
-		return visivel, "", "", ""
+		return visivel, nil
 	}
-	pedido := beatitudeCurto(strings.TrimSpace(p.Pedido), 3000)
-	porque := beatitudeCurto(strings.TrimSpace(p.Porque), 160)
-	res, err := panel.store.db.Exec(`INSERT INTO beatitude_bastoes (pedido, porque, criado_em) VALUES (?, ?, ?)`, pedido, porque, time.Now())
+	b := &beatitudeBastao{
+		Pedido: beatitudeCurto(strings.TrimSpace(p.Pedido), 3000),
+		Porque: beatitudeCurto(strings.TrimSpace(p.Porque), 160),
+	}
+	for _, a := range p.Anexos {
+		if a = strings.ToUpper(strings.TrimSpace(a)); a != "" && len(b.Anexos) < beatitudeExecutorMaxAnexos {
+			b.Anexos = append(b.Anexos, a)
+		}
+	}
+	res, err := panel.store.db.Exec(`INSERT INTO beatitude_bastoes (pedido, porque, criado_em) VALUES (?, ?, ?)`, b.Pedido, b.Porque, time.Now())
 	if err != nil {
-		return visivel, "", "", ""
+		return visivel, nil
 	}
-	id, _ := res.LastInsertId()
-	codigo = beatitudeCodigoBastao(id)
-	comVolta := pontePareado()
-	if comVolta {
-		go beatitudeRegistrarBastao(id, codigo, pedido)
+	b.ID, _ = res.LastInsertId()
+	b.Codigo = beatitudeCodigoBastao(b.ID)
+	b.ComVolta = pontePareado()
+	if b.ComVolta {
+		go beatitudeRegistrarBastao(b.ID, b.Codigo, b.Pedido)
 	}
-	return visivel, beatitudeAvisoBastao(codigo, porque, comVolta), beatitudeTextoBastao(codigo, pedido, comVolta), codigo
+	return visivel, b
 }
 
 // beatitudeRegistrarBastao avisa o servidor que o código existe, para que
@@ -186,8 +222,8 @@ func beatitudeListarBastoes(agora time.Time) []string {
 	if panel.store == nil {
 		return nil
 	}
-	rows, err := panel.store.db.Query(`SELECT id, pedido FROM beatitude_bastoes
-		WHERE devolvido_em IS NULL AND criado_em >= ? ORDER BY id`, agora.Add(-beatitudeBastaoValidade))
+	rows, err := panel.store.db.Query(`SELECT id, pedido, COALESCE(executor,''), COALESCE(precisa,'') FROM beatitude_bastoes
+		WHERE devolvido_em IS NULL AND criado_em >= ? AND COALESCE(executor,'') NOT IN ('feito','falhou','cancelado') ORDER BY id`, agora.Add(-beatitudeBastaoValidade))
 	if err != nil {
 		return nil
 	}
@@ -195,15 +231,27 @@ func beatitudeListarBastoes(agora time.Time) []string {
 	var linhas []string
 	for rows.Next() {
 		var id int64
-		var pedido string
-		if rows.Scan(&id, &pedido) == nil {
-			linhas = append(linhas, "*"+beatitudeCodigoBastao(id)+"*: "+beatitudeCurto(strings.ReplaceAll(pedido, "\n", " "), 120))
+		var pedido, estado, precisa string
+		if rows.Scan(&id, &pedido, &estado, &precisa) == nil {
+			cod := beatitudeCodigoBastao(id)
+			l := "*" + cod + "*"
+			switch estado {
+			case beatitudeExecRodando:
+				l += " (rodando neste " + maquina() + "; *para " + cod + "* interrompe)"
+			case beatitudeExecFila:
+				l += " (na fila deste " + maquina() + ")"
+			case beatitudeExecPausado:
+				l += " (esperando você: " + beatitudeCurto(precisa, 100) + "; responda *continua " + cod + "* e a resposta)"
+			default:
+				l += " (para colar numa conversa do Claude)"
+			}
+			linhas = append(linhas, l+": "+beatitudeCurto(strings.ReplaceAll(pedido, "\n", " "), 120))
 		}
 	}
 	if len(linhas) == 0 {
 		return []string{beatitudeMarca + ": nenhum pedido esperando volta do seu Claude."}
 	}
-	return append([]string{beatitudeMarca + ": esperando volta do seu Claude (valem 24 h):"}, linhas...)
+	return append([]string{beatitudeMarca + ": com o seu Claude (valem 24 h):"}, linhas...)
 }
 
 // beatitudeEhMensagemDoBastao: a própria mensagem a copiar, que a ponte

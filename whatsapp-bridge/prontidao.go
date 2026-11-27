@@ -72,6 +72,9 @@ func prontidaoItens(agora bool) []prontidaoItem {
 			prontidaoCache.itens = append(prontidaoCache.itens, prontidaoAppAberto(a))
 		}
 	}
+	if ligado, _, _ := beatitudeExecutorConfig(); ligado { // executor do bastão: só conta se a máquina o ligou
+		prontidaoCache.itens = append(prontidaoCache.itens, prontidaoExecutor())
+	}
 	prontidaoCache.itens = append(prontidaoCache.itens, prontidaoFileVault(), prontidaoEntradaAutomatica())
 	prontidaoCache.em = time.Now()
 	return prontidaoCache.itens

@@ -168,6 +168,10 @@ func beatitudeContinuarNavegador(id int64) {
 		beatitudeSend(beatitudeMarca + fmt.Sprintf(": a tarefa %d ficou mais de 30 minutos parada e foi cancelada. Peça de novo.", id))
 		return
 	}
+	if aviso, ocupado := beatitudeChromeOcupado(fmt.Sprintf("Responda *continua %d* de novo", id)); ocupado {
+		beatitudeSend(aviso)
+		return
+	}
 	_, _ = panel.store.db.Exec(`UPDATE beatitude_navegador SET pausado_em = NULL WHERE id = ?`, id)
 	claude, err := beatitudeAcharClaude()
 	if err != nil {

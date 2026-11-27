@@ -872,6 +872,15 @@ async function loadBeatitude() {
             <span class="st">"pensa melhor" ou "com calma" no pedido usa o opus naquela vez. O teste roda um Claude de sondagem (~20 s) e diz quais MCPs ele enxerga no modo rápido; se a agenda e o Gmail não aparecerem, deixe desligado.</span>
             <div id="bt-teste-rapido" class="st"></div>
           </div>
+          <div><b>Executor</b>
+            pedido que precisa de arquivo e código roda sozinho neste computador:
+            <button class="btn ghost" onclick="btAjustar({executor:${b.executor && b.executor.ligado ? 'false' : 'true'}})">${b.executor && b.executor.ligado ? 'ligado · desligar' : 'desligado · ligar'}</button>
+            <span class="st">${b.executor && b.executor.ligado
+              ? (b.executor.sandbox
+                  ? `Sandbox disponível. Hoje: ${b.executor.hoje} de ${b.executor.teto_do_dia}${b.executor.rodando ? ' · rodando ' + esc(b.executor.rodando) : ''}${b.executor.fila ? ' · ' + b.executor.fila + ' na fila' : ''}. Cada pedido trabalha em ~/Beatitude/Pedidos e devolve o resultado ao grupo.`
+                  : `Sem sandbox neste computador (${esc(b.executor.motivo || '')}): o pedido segue como texto para colar numa conversa do Claude.`)
+              : 'Desligado, o pedido fora do alcance do mordomo vem como texto para colar numa conversa do Claude. Ligado, um segundo Claude Code faz o trabalho numa pasta isolada (terminal em sandbox, web e Chrome; não envia mensagem nem lê o WhatsApp).'}</span>
+          </div>
           <div><b>Conectores</b>
             o que o mordomo alcança da conta Claude desta pessoa:
             ${(b.conectores || []).map(c => `<label style="margin-right:10px;white-space:nowrap"><input type="checkbox" class="bt-con" value="${esc(c.id)}" ${c.ligado ? 'checked' : ''} onchange="btConectores()"> ${esc(c.nome)}</label>`).join('')}

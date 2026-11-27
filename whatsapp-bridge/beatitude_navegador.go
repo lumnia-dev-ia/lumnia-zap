@@ -159,6 +159,14 @@ func beatitudeExecutarNavegador(id int64) {
 		beatitudeSend(beatitudeMarca + ": essa tarefa já foi feita ou expirou. Peça de novo.")
 		return
 	}
+	repetir := "Responda *abre* de novo"
+	if leitura == 1 {
+		repetir = "Peça de novo"
+	}
+	if aviso, ocupado := beatitudeChromeOcupado(repetir); ocupado {
+		beatitudeSend(aviso)
+		return
+	}
 	_, _ = panel.store.db.Exec(`UPDATE beatitude_navegador SET iniciado_em = ? WHERE id = ?`, time.Now(), id)
 
 	claude, err := beatitudeAcharClaude()
@@ -200,7 +208,7 @@ func beatitudeNavSistema(leitura bool) string {
 		), "\n")
 	}
 	return strings.Join(append(comum,
-		"Pare antes de: informar dados de cartão; digitar senha, código de verificação ou criar conta; assinar; contratar algo a mais (seguro, assinatura, clube); enviar mensagem a alguém; qualquer coisa irreversível. Nesses pontos, deixe a página pronta e diga exatamente o que falta ela fazer e em qual aba.",
+		beatitudeRegraChromePare,
 		"Compra ou reserva paga que a pessoa já aprovou (opção e valor estão na tarefa): preencha o que a tarefa manda, recuse seguro, bagagem extra, assento pago e ofertas que ela não pediu, e vá até o pagamento. Marcar a caixa de condições da tarifa ou da compra pode, quando for exigido para seguir; contrato novo (conta, assinatura, seguro) não.",
 		"No pagamento, escolha PIX. Gere o código copia-e-cola e devolva-o num bloco exatamente assim, no fim da resposta: <pix>CÓDIGO</pix>, só o código, numa linha, exatamente como o site mostrou (sem tirar nem acrescentar caracteres). No texto visível diga o resumo da compra (o quê, para quem, quando, valor total) e até que hora o PIX vale. Gerar o PIX não paga nada; quem paga é ela, no app do banco. Se o site não oferecer PIX, pare na tela de pagamento e diga isso.",
 		"Dados pessoais dela (nome como no documento, nascimento, documento, telefone, e-mail) vêm do Caderno: use ler_caderno do Beatitude e procure a nota de viagem ou de dados pessoais. Se um dado faltar, pare e diga qual falta; nunca invente nem use dado de outra pessoa. Não repita documento nem telefone na resposta.",
@@ -209,10 +217,26 @@ func beatitudeNavSistema(leitura bool) string {
 	), "\n")
 }
 
+// beatitudeRegraChromePare: onde o Chrome para. Vale para a tarefa de
+// navegador e para o executor do bastão (beatitude_executor.go).
+const beatitudeRegraChromePare = "Pare antes de: informar dados de cartão; digitar senha, código de verificação ou criar conta; assinar; contratar algo a mais (seguro, assinatura, clube); enviar mensagem a alguém; qualquer coisa irreversível. Nesses pontos, deixe a página pronta e diga exatamente o que falta ela fazer e em qual aba."
+
+// beatitudeChromeOcupado: o executor do bastão está com o Chrome? Devolve a
+// linha a mandar ao grupo; a tarefa fica como estava, para ela repetir depois.
+func beatitudeChromeOcupado(repetir string) (string, bool) {
+	cod := beatitudeExecutorAtual()
+	if cod == "" {
+		return "", false
+	}
+	return beatitudeMarca + ": o Chrome deste " + maquina() + " está com o pedido *" + cod + "*. " + repetir + " quando ele terminar (eu aviso aqui), ou interrompa com *para " + cod + "*.", true
+}
+
 // beatitudeNavRodar roda o passo com o Chrome (novo ou continuado) e entrega
 // ao grupo: texto, PIX e, se a página pediu login ou CAPTCHA, o aviso com
 // "continua N" (beatitude_preciso.go).
 func beatitudeNavRodar(claude string, id int64, tarefa, prompt, sistema string, extra []string) {
+	beatitudeChromeMu.Lock() // um só usa o Chrome por vez (o executor do bastão também)
+	defer beatitudeChromeMu.Unlock()
 	inicio := time.Now()
 	args := append([]string{"--chrome", "--model", beatitudeModeloNavegador}, extra...)
 	resp, m, err := beatitudeExecClaudeMedido(claude, prompt, sistema,

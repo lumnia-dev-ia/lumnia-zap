@@ -70,6 +70,35 @@ descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
   no grupo ("Pedido feito no app: …") e confirmado ao app. Servidor sem a rota
   (404): a ponte espera 30 minutos e segue normal.
 
+**O bastão roda sozinho neste computador (executor)**
+- Em 27/11 um pedido com planilha voltou como texto para colar numa conversa
+  do Claude; ninguém colou e nada rodou. Com o executor ligado, a ponte abre
+  um segundo Claude Code que faz o trabalho numa pasta só do pedido
+  (`~/Beatitude/Pedidos/B1`, com `entrada/` e `saida/`) e devolve o resultado
+  ao grupo: o texto e, anexados, até 5 arquivos de até 20 MB. Se houver a
+  pasta `Beatitude` no Google Drive para computador, `saida/` é copiada para
+  `Beatitude/Pedidos/B1`.
+- **Desligado de fábrica.** Liga-se por máquina no painel (Beatitude →
+  Executor). Desligado, nada muda: o bastão segue como texto para colar.
+- Falta um dado: ele pergunta no grupo e espera até 24 h. *continua B1* e a
+  resposta retoma a mesma conversa. *para B1* interrompe (mata o processo e o
+  que ele abriu no terminal); *para B1 manda para eu colar* devolve o texto do
+  plano B. *bastões* mostra o que está rodando, na fila ou esperando.
+- Um por vez, sem travar o mordomo. Teto de 10 por dia e 45 minutos por
+  rodada; acima do teto, sem sandbox ou em pedido que depende de projeto do
+  claude.ai, volta a colar.
+- Travas no código: o executor não tem ferramenta de envio (quem posta é a
+  ponte); o terminal roda no sandbox do Claude Code, escreve só na pasta do
+  pedido e não lê a pasta pessoal fora dela; Read e Edit só nessa pasta; sem
+  sandbox o Claude Code nem sobe. A rede do terminal é uma lista (PyPI,
+  GitHub, npm, gov.br), ajustável em `executor_dominios`. Por padrão ele não
+  lê o WhatsApp: o que precisa vem no pedido e em `entrada/`.
+- O Chrome é de um por vez: com um pedido rodando, a tarefa de navegador
+  avisa e espera o *abre* de novo.
+- Com o executor ligado, o mordomo deixa de narrar a passagem ("passei ao
+  Claude do computador"): quem diz o que aconteceu é a ponte.
+- Linux: precisa de `bubblewrap` e `socat`. Windows: não há executor.
+
 ## 1.1.4 — 24 de novembro de 2026
 
 **O WhatsApp voltou a aceitar a conexão**

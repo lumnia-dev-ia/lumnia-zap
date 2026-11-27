@@ -15,3 +15,7 @@ import (
 func semJanela(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 }
+
+// emGrupoProprio: no Windows o módulo Beatitude não existe; o padrão do
+// exec.CommandContext (matar o processo) basta.
+func emGrupoProprio(*exec.Cmd) {}

@@ -184,7 +184,7 @@ func falaEhConversa(texto string) bool {
 	if falaEhRuido(t) {
 		return false
 	}
-	if beatitudeEhAprovacaoNavegador(t) || beatitudeEhComando(t) || beatitudeEhListaAgendadas(t) || beatitudeEhCancelaLivre(t) || beatitudeContinuaRe.MatchString(t) || beatitudeBastoesRe.MatchString(t) {
+	if beatitudeEhAprovacaoNavegador(t) || beatitudeEhComando(t) || beatitudeEhListaAgendadas(t) || beatitudeEhCancelaLivre(t) || beatitudeContinuaRe.MatchString(t) || beatitudeContinuaBastaoRe.MatchString(t) || beatitudeParaBastaoRe.MatchString(t) || beatitudeBastoesRe.MatchString(t) {
 		return false
 	}
 	return true

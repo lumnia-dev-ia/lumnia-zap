@@ -125,9 +125,7 @@ func ponteRequisitar(metodo, rota, tipo string, corpo io.Reader, saida interface
 	if token == "" {
 		return 0, fmt.Errorf("Mac não pareado com o app")
 	}
-	if base == "" {
-		base = ponteURLPadrao
-	}
+	base = ponteBase(base)
 	ctx, cancel := context.WithTimeout(context.Background(), ponteTimeoutHTTP)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, metodo, strings.TrimRight(base, "/")+rota, corpo)
@@ -138,7 +136,7 @@ func ponteRequisitar(metodo, rota, tipo string, corpo io.Reader, saida interface
 		req.Header.Set("Content-Type", tipo)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ponteFazer(req)
 	if err != nil {
 		return 0, err
 	}

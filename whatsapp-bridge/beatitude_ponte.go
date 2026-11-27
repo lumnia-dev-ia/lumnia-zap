@@ -25,9 +25,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -43,7 +45,7 @@ import (
 )
 
 const (
-	ponteURLPadrao      = "https://beatitude.lumnia.dev"
+	ponteURLPadrao      = "https://beatitude.ai"
 	ponteConfigPath     = "store/beatitude-ponte.json"
 	ponteCiclo          = 60 * time.Second
 	ponteRetratoCada    = 10 * time.Minute
@@ -192,6 +194,64 @@ func (e *ponteErroHTTP) Error() string {
 	return fmt.Sprintf("servidor respondeu %d (%s)", e.Status, e.Codigo)
 }
 
+// ponteURLAntiga: o endereco do app ate 25-11-2026. Pareamento que ainda o
+// tenha gravado passa a usar o atual.
+const ponteURLAntiga = "beatitude.lumnia.dev"
+
+// ponteBase: o endereco do app para esta maquina. Vale o gravado no
+// pareamento; vazio ou o antigo, o padrao.
+func ponteBase(gravado string) string {
+	b := strings.TrimRight(strings.TrimSpace(gravado), "/")
+	if b == "" {
+		return ponteURLPadrao
+	}
+	if u, err := url.Parse(b); err == nil && strings.EqualFold(u.Hostname(), ponteURLAntiga) {
+		return ponteURLPadrao
+	}
+	return b
+}
+
+// ponteErroEndereco: o app respondeu com um redirecionamento para outro
+// dominio. O Go descarta o Authorization nesse caso, e o servidor novo
+// devolvia 401 (token_invalido) a cada minuto sem dizer por que (25-11).
+// Agora a ponte para e diz para onde o app foi.
+type ponteErroEndereco struct {
+	De, Para string
+}
+
+func (e *ponteErroEndereco) Error() string {
+	return fmt.Sprintf("o app mudou de endereço: %s redireciona para %s. Atualize o Lumnia Zap ou grave \"url\": \"%s\" em store/beatitude-ponte.json", e.De, e.Para, e.Para)
+}
+
+// ponteHTTP: cliente das chamadas com token. Segue redirecionamento so no
+// mesmo host; para outro, devolve ponteErroEndereco em vez de mandar a
+// chamada sem o token.
+var ponteHTTP = &http.Client{CheckRedirect: ponteChecarRedirecionamento}
+
+func ponteChecarRedirecionamento(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("redirecionamentos demais a partir de %s", via[0].URL.Host)
+	}
+	if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		return &ponteErroEndereco{
+			De:   via[0].URL.Scheme + "://" + via[0].URL.Host,
+			Para: req.URL.Scheme + "://" + req.URL.Host,
+		}
+	}
+	return nil
+}
+
+// ponteFazer executa a requisicao com o cliente da ponte. Erro de endereco
+// chega sem o embrulho do url.Error, para o painel e o log mostrarem a frase.
+func ponteFazer(req *http.Request) (*http.Response, error) {
+	resp, err := ponteHTTP.Do(req)
+	var e *ponteErroEndereco
+	if err != nil && errors.As(err, &e) {
+		return nil, e
+	}
+	return resp, err
+}
+
 // ponteChamar faz POST JSON na rota da ponte com o token deste Mac.
 func ponteChamar(rota string, corpo interface{}, saida interface{}) (int, error) {
 	ponte.mu.Lock()
@@ -201,9 +261,7 @@ func ponteChamar(rota string, corpo interface{}, saida interface{}) (int, error)
 	if token == "" {
 		return 0, fmt.Errorf("Mac não pareado com o app")
 	}
-	if base == "" {
-		base = ponteURLPadrao
-	}
+	base = ponteBase(base)
 	b, err := json.Marshal(corpo)
 	if err != nil {
 		return 0, err
@@ -216,7 +274,7 @@ func ponteChamar(rota string, corpo interface{}, saida interface{}) (int, error)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := ponteFazer(req)
 	if err != nil {
 		return 0, err
 	}

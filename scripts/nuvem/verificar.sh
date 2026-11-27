@@ -74,7 +74,7 @@ esac
 mcp=$(cd "$CASA" && timeout 90 claude mcp list </dev/null 2>/dev/null | grep -i '^beatitude' || true)
 case $mcp in
   *Connected*|*✓*) : ;;
-  "") caiu "mcp beatitude" "não está configurado" "Na tela, terminal: claude mcp add --scope user --transport http beatitude https://beatitude.lumnia.dev/mcp e autorizar." ;;
+  "") caiu "mcp beatitude" "não está configurado" "Na tela, terminal: claude mcp add --scope user --transport http beatitude https://beatitude.ai/mcp e autorizar." ;;
   *) caiu "mcp beatitude" "sem conexão ou sem autorização" "Na tela, terminal: claude, depois /mcp, escolher beatitude e Autenticar com a conta de $PESSOA." ;;
 esac
 
@@ -108,7 +108,7 @@ try:
     cfg = json.load(open(cfg_path))
 except Exception:
     print("sem ponte pareada: alerta não enviado"); sys.exit(0)
-url = (cfg.get("url") or "https://beatitude.lumnia.dev").rstrip("/") + "/api/ponte/alerta"
+url = (cfg.get("url") or "https://beatitude.ai").rstrip("/") + "/api/ponte/alerta"
 versao = "nuvem"
 try:
     versao = json.load(urllib.request.urlopen("http://127.0.0.1:8080/api/panel/status", timeout=10)).get("version") or versao

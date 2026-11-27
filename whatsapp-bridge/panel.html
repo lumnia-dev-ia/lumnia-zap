@@ -991,7 +991,7 @@ async function btTestarRapido(btn) {
     const r = await btPost('/api/panel/beatitude/testar-rapido');
     const seg = ms => (ms/1000).toFixed(1) + ' s';
     out.innerHTML = `Claude enxergou: <b>${esc(r.servidores || '(nada)')}</b> · processo ${seg(r.claude_ms)} · subida ≈${seg(r.subida_ms)} · ` +
-      (r.tem_zap ? 'Zap ✓' : 'Zap ✗') + ' · ' + (r.tem_beatitude ? 'Beatitude ✓' : 'Beatitude ✗ (rode no Terminal: claude mcp add --transport http --scope user beatitude https://beatitude.lumnia.dev/mcp e autentique)') +
+      (r.tem_zap ? 'Zap ✓' : 'Zap ✗') + ' · ' + (r.tem_beatitude ? 'Beatitude ✓' : 'Beatitude ✗ (rode no Terminal: claude mcp add --transport http --scope user beatitude https://beatitude.ai/mcp e autentique)') +
       ' · ' + (r.tem_google ? 'Google ✓' : 'Google ✗ (agenda e Gmail não entram no modo rápido)') + (r.erro ? ' · erro: ' + esc(r.erro) : '');
   } catch (e) { out.textContent = 'falhou: ' + (e.message || e); }
   btn.disabled = false;

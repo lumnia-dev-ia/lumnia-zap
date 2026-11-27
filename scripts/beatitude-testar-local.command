@@ -46,7 +46,7 @@ fi
 
 echo
 echo "Opcional, para o pedido \"temas\" usar o Beatitude:"
-echo "  claude mcp add --transport http --scope user beatitude https://beatitude.lumnia.dev/mcp"
+echo "  claude mcp add --transport http --scope user beatitude https://beatitude.ai/mcp"
 echo "  depois abra: claude   →  digite /mcp  →  autentique o beatitude"
 echo
 echo "Para voltar atrás: cp \"$DEST/whatsapp-bridge.anterior\" \"$DEST/whatsapp-bridge.novo\" && mv -f \"$DEST/whatsapp-bridge.novo\" \"$DEST/whatsapp-bridge\" && launchctl kickstart -k gui/\$(id -u)/dev.lumnia.zap"

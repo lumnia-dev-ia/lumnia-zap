@@ -52,7 +52,7 @@ const (
 	beatitudeTimeout      = 8 * time.Minute
 	beatitudeModeloPadrao = "sonnet" // o mordomo acha conversa, resume e escreve rascunho curto; "pensa melhor" no pedido chama o opus
 	beatitudeModeloForte  = "opus"
-	beatitudeMCPURL       = "https://beatitude.lumnia.dev/mcp"
+	beatitudeMCPURL       = "https://beatitude.ai/mcp"
 	beatitudeMaxPorHora   = 30            // era 15; em 10-11 a Lisiane bateu 15 em 21 minutos de uso normal
 	beatitudeJanelaAtraso = 6 * time.Hour // pedido mais velho que isso (Mac dormindo) e ignorado
 	beatitudeMaxChars     = 3500          // por mensagem enviada ao grupo

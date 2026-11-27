@@ -153,8 +153,13 @@ var (
 		padroes := []struct{ nome, padrao string }{
 			{"Drive", filepath.Join(nuvem, "GoogleDrive-*", "My Drive", "Beatitude")},
 			{"Drive", filepath.Join(nuvem, "GoogleDrive-*", "Meu Drive", "Beatitude")},
-			{"OneDrive", filepath.Join(nuvem, "OneDrive*", "Beatitude")},
-			{"OneDrive", filepath.Join(home, "OneDrive*", "Beatitude")}, // Linux e instalações antigas
+			// OneDrive: o app só enxerga a pasta de aplicativo
+			// (Files.ReadWrite.AppFolder) e cria "Beatitude" dentro dela:
+			// OneDrive/Apps/<nome do app>/Beatitude ("Aplicativos" em português).
+			{"OneDrive", filepath.Join(nuvem, "OneDrive*", "Apps", "*", "Beatitude")},
+			{"OneDrive", filepath.Join(nuvem, "OneDrive*", "Aplicativos", "*", "Beatitude")},
+			{"OneDrive", filepath.Join(home, "OneDrive*", "Apps", "*", "Beatitude")}, // Linux e instalações antigas
+			{"OneDrive", filepath.Join(home, "OneDrive*", "Aplicativos", "*", "Beatitude")},
 		}
 		var out []beatitudeDrive
 		ja := map[string]bool{}

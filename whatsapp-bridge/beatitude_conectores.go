@@ -68,10 +68,11 @@ var beatitudeConectores = []beatitudeConector{
 	},
 	{
 		ID:         "microsoft",
-		Nome:       "Microsoft 365 (Outlook)",
+		Nome:       "Microsoft 365 (Outlook, OneDrive)",
 		Servidores: []string{"Microsoft_365"},
 		// Lista fechada, ferramenta por ferramenta: enviar, encaminhar, apagar,
-		// responder convite, regras e arquivos ficam de fora.
+		// responder convite e regras ficam de fora. Arquivos (OneDrive e
+		// SharePoint): só achar e ler, como o Drive do Google (27-11).
 		Liberadas: []string{
 			"mcp__claude_ai_Microsoft_365__outlook_email_search",
 			"mcp__claude_ai_Microsoft_365__outlook_calendar_search",
@@ -85,6 +86,8 @@ var beatitudeConectores = []beatitudeConector{
 			"mcp__claude_ai_Microsoft_365__outlook_create_reply_draft",
 			"mcp__claude_ai_Microsoft_365__outlook_create_event",
 			"mcp__claude_ai_Microsoft_365__outlook_update_event",
+			"mcp__claude_ai_Microsoft_365__sharepoint_search",
+			"mcp__claude_ai_Microsoft_365__sharepoint_folder_search",
 		},
 		Negadas: []string{ // redundante com a lista fechada, por garantia
 			"mcp__claude_ai_Microsoft_365__outlook_send_mail", "mcp__claude_ai_Microsoft_365__outlook_send_draft",
@@ -93,8 +96,12 @@ var beatitudeConectores = []beatitudeConector{
 			"mcp__claude_ai_Microsoft_365__outlook_trash_thread", "mcp__claude_ai_Microsoft_365__outlook_batch_delete_messages",
 			"mcp__claude_ai_Microsoft_365__outlook_delete_draft", "mcp__claude_ai_Microsoft_365__outlook_set_vacation",
 			"mcp__claude_ai_Microsoft_365__outlook_create_filter", "mcp__claude_ai_Microsoft_365__sharepoint_delete_item",
+			// arquivos: só leitura
+			"mcp__claude_ai_Microsoft_365__sharepoint_update_file", "mcp__claude_ai_Microsoft_365__sharepoint_upload_file",
+			"mcp__claude_ai_Microsoft_365__sharepoint_copy_item", "mcp__claude_ai_Microsoft_365__sharepoint_move_item",
+			"mcp__claude_ai_Microsoft_365__sharepoint_rename_item", "mcp__claude_ai_Microsoft_365__sharepoint_create_folder",
 		},
-		Regra: "Microsoft (quem usa Outlook): as mesmas regras do Google pelo conector Microsoft 365. Ler e-mail e agenda; e-mail só como RASCUNHO (outlook_create_draft ou outlook_create_reply_draft), nunca enviar; evento só na agenda dela e sem convidados (outlook_create_event, outlook_update_event). Use o Google ou o Microsoft conforme o que estiver conectado; se os dois estiverem, a agenda e o e-mail de trabalho costumam ser os do Microsoft.",
+		Regra: "Microsoft (quem usa Outlook): as mesmas regras do Google pelo conector Microsoft 365. Ler e-mail e agenda; e-mail só como RASCUNHO (outlook_create_draft ou outlook_create_reply_draft), nunca enviar; evento só na agenda dela e sem convidados (outlook_create_event, outlook_update_event). Use o Google ou o Microsoft conforme o que estiver conectado; se os dois estiverem, a agenda e o e-mail de trabalho costumam ser os do Microsoft. Arquivos do OneDrive e do SharePoint: só leitura, para achar (sharepoint_search, sharepoint_folder_search) e resumir (read_resource); nunca criar, mover, renomear nem apagar.",
 	},
 	{
 		ID:   "timao",

@@ -77,7 +77,7 @@ descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
   (`~/Beatitude/Pedidos/B1`, com `entrada/` e `saida/`) e devolve o resultado
   ao grupo: o texto e, anexados, até 5 arquivos de até 20 MB. Se houver a
   pasta `Beatitude` do Google Drive ou do OneDrive sincronizada no computador
-  (ou das duas), `saida/` é copiada para `Beatitude/Pedidos/B1`.
+  (ou das duas; no OneDrive ela fica em `Apps/<nome do app>/Beatitude`), `saida/` é copiada para `Beatitude/Pedidos/B1`.
 - **Desligado de fábrica.** Liga-se por máquina no painel (Beatitude →
   Executor). Desligado, nada muda: o bastão segue como texto para colar.
 - Falta um dado: ele pergunta no grupo e espera até 24 h. *continua B1* e a
@@ -103,6 +103,8 @@ descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
 - O app passou a aceitar entrada e conexões do Google e da Microsoft, juntas ou
   não. Na ponte: o teste do modo rápido reconhece também o conector Microsoft
   365, e a tarefa de navegador lê a agenda do Outlook como já lia a do Google.
+- O mordomo passa a achar e ler arquivos do OneDrive e do SharePoint pelo
+  conector Microsoft 365, só leitura, como já fazia com o Google Drive.
 
 ## 1.1.4 — 24 de novembro de 2026
 

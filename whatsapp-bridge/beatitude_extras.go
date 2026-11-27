@@ -56,7 +56,7 @@ func initBeatitudeExtras() {
 	}
 	// Rascunho com horario (10-11). "duplicate column" e esperado em bancos ja migrados.
 	for _, col := range []string{"enviar_em TIMESTAMP", "agendamento_id INTEGER", "so_agora INTEGER DEFAULT 0", "cancelado_em TIMESTAMP",
-		"anexo_msg_id TEXT", "anexo_nome TEXT"} {
+		"anexo_msg_id TEXT", "anexo_nome TEXT", "falha TEXT", "mudou_em TIMESTAMP"} {
 		if _, err := panel.store.db.Exec("ALTER TABLE beatitude_rascunhos ADD COLUMN " + col); err != nil &&
 			!strings.Contains(err.Error(), "duplicate column") && panel.logger != nil {
 			panel.logger.Warnf("Beatitude: falha ao acrescentar coluna %s: %v", col, err)
@@ -882,11 +882,7 @@ func beatitudeComando(texto string, agora time.Time) []string {
 	modoAgora := beatitudeAgoraRe.MatchString(texto) && !beatitudeEnviaTextoRe.MatchString(texto)
 	modoCancela := beatitudeCancelaRe.MatchString(texto)
 
-	type alvo struct {
-		n     int
-		id    int64  // quando o alvo vem de fora do ultimo lote (agendado antigo)
-		texto string // vazio = usar o rascunho
-	}
+	type alvo = beatitudeAlvo
 	var alvos []alvo
 
 	// sem numero, "agora"/"cancela" valem para o unico rascunho em aberto: o
@@ -930,7 +926,7 @@ func beatitudeComando(texto string, agora time.Time) []string {
 			n, _ := strconv.Atoi(m[1])
 			alvos = append(alvos, alvo{n: n})
 		} else if alvos = unico(); alvos == nil {
-			return []string{beatitudeMarca + ": diga qual: *cancela 1*, *cancela 2*…"}
+			return []string{beatitudeMarca + ": diga qual: *cancela 1*, *cancela 2*… (*programadas* lista o que vai sair)"}
 		}
 	case modoAgora:
 		if m := beatitudeAgoraRe.FindStringSubmatch(texto); m[1] != "" {
@@ -978,7 +974,20 @@ func beatitudeComando(texto string, agora time.Time) []string {
 	if len(alvos) == 0 {
 		return []string{beatitudeMarca + ": não achei o que enviar. Use, por exemplo, *envia 1*."}
 	}
+	return beatitudeAplicar(alvos, ultimoLote, modoAgora, modoCancela, agora)
+}
 
+// beatitudeAlvo: um rascunho apontado por um comando. Com id, vale o id (de
+// qualquer lote); sem id, vale o N do ultimo lote.
+type beatitudeAlvo struct {
+	n     int
+	id    int64
+	texto string // vazio = usar o rascunho
+}
+
+// beatitudeAplicar executa envio, agendamento, "agora" ou cancelamento nos
+// alvos. Usado pelos comandos do grupo e pelos comandos vindos do app.
+func beatitudeAplicar(alvos []beatitudeAlvo, ultimoLote int64, modoAgora, modoCancela bool, agora time.Time) []string {
 	var linhas []string
 	for _, a := range alvos {
 		var r beatitudeRascunhoLinha
@@ -1004,12 +1013,7 @@ func beatitudeComando(texto string, agora time.Time) []string {
 		}
 
 		if modoCancela {
-			if r.agendamento != nil {
-				_, _ = panel.store.db.Exec(`UPDATE panel_schedules SET enabled = 0, last_status = 'cancelada no grupo Beatitude' WHERE id = ?`, *r.agendamento)
-			}
-			_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET cancelado_em = ? WHERE id = ?`, agora, r.id)
-			linhas = append(linhas, rot+": cancelado, não vai sair")
-			beatitudeRegistrar(agora, "cancela "+strconv.Itoa(r.n), "cancelado para "+nome, "cancelado", "")
+			linhas = append(linhas, beatitudeCancelarRascunho(r, agora, "cancela "+strconv.Itoa(r.n)))
 			continue
 		}
 
@@ -1029,7 +1033,8 @@ func beatitudeComando(texto string, agora time.Time) []string {
 				linhas = append(linhas, rot+": não consegui trocar o texto ("+err.Error()+"). Segue o texto anterior.")
 				continue
 			}
-			_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET texto = ? WHERE id = ?`, final, r.id)
+			_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET texto = ?, mudou_em = ? WHERE id = ?`, final, agora, r.id)
+			ponteAgendadasMudaram()
 			linhas = append(linhas, rot+": texto trocado"+q+".\n"+final)
 			beatitudeRegistrar(agora, "muda "+strconv.Itoa(r.n), "texto trocado para "+nome, "agendado", "")
 			continue
@@ -1055,7 +1060,8 @@ func beatitudeComando(texto string, agora time.Time) []string {
 					linhas = append(linhas, rot+": não consegui agendar ("+err.Error()+"). Nada foi enviado.")
 					continue
 				}
-				_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET agendamento_id = ?, texto = ? WHERE id = ?`, id, final, r.id)
+				_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET agendamento_id = ?, texto = ?, mudou_em = ? WHERE id = ?`, id, final, agora, r.id)
+				ponteAgendadasMudaram()
 				linhas = append(linhas, rot+": aprovado, sai *"+beatitudeQuando(*r.enviarEm, agora)+"*. Para desistir: *cancela "+strconv.Itoa(r.n)+"*")
 				beatitudeRegistrar(agora, "agenda "+strconv.Itoa(r.n), "agendado para "+nome+" em "+r.enviarEm.In(panelLoc).Format("02/01 15:04"), "agendado", "")
 				continue
@@ -1084,7 +1090,10 @@ func beatitudeComando(texto string, agora time.Time) []string {
 			linhas = append(linhas, fmt.Sprintf("%s: não foi (%s)", rot, msg))
 			continue
 		}
-		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ?, texto = ? WHERE id = ?`, time.Now(), final, r.id)
+		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ?, mudou_em = ?, texto = ? WHERE id = ?`, time.Now(), time.Now(), final, r.id)
+		if r.agendamento != nil {
+			ponteAgendadasMudaram()
+		}
 		if caminho != "" {
 			if ok, msg := panelSendArquivo(r.jid, caminho, "beatitude-aprovado"); !ok {
 				linhas = append(linhas, rot+": texto enviado, mas o arquivo "+r.anexoNome+" não foi ("+msg+"). Anexe à mão na conversa.")
@@ -1135,7 +1144,8 @@ func beatitudeAoRodarAgendamento(id int64, status string, quando time.Time) {
 	nome := beatitudeNomeDestino(r.jid)
 	hora := quando.In(panelLoc).Format("15:04")
 	if status == "enviada" {
-		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ? WHERE id = ?`, time.Now(), r.id)
+		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ?, mudou_em = ? WHERE id = ?`, time.Now(), time.Now(), r.id)
+		ponteAgendadasMudaram()
 		beatitudeRegistrar(time.Now(), "agendado "+strconv.Itoa(r.n), "enviado para "+nome+" às "+hora, "envio", "")
 		if r.anexoNome != "" {
 			beatitudeSend(beatitudeMarca + ": enviei às " + hora + " para " + nome + ", com o arquivo " + r.anexoNome + ", como combinado.")
@@ -1145,13 +1155,15 @@ func beatitudeAoRodarAgendamento(id int64, status string, quando time.Time) {
 		return
 	}
 	if strings.HasPrefix(status, "enviada sem o arquivo") { // o texto saiu; o arquivo nao
-		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ? WHERE id = ?`, time.Now(), r.id)
+		_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET enviado_em = ?, mudou_em = ? WHERE id = ?`, time.Now(), time.Now(), r.id)
+		ponteAgendadasMudaram()
 		beatitudeRegistrar(time.Now(), "agendado "+strconv.Itoa(r.n), "enviado para "+nome+" às "+hora+" sem o arquivo", "erro", status)
 		beatitudeSend(beatitudeMarca + ": às " + hora + " enviei o texto para " + nome + ", mas o arquivo " + r.anexoNome +
 			" *não foi* (" + strings.TrimPrefix(status, "enviada sem o arquivo: ") + "). Anexe à mão na conversa.")
 		return
 	}
-	_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET cancelado_em = ? WHERE id = ?`, time.Now(), r.id)
+	_, _ = panel.store.db.Exec(`UPDATE beatitude_rascunhos SET cancelado_em = ?, mudou_em = ?, falha = ? WHERE id = ?`, time.Now(), time.Now(), beatitudeCurto(status, 200), r.id)
+	ponteAgendadasMudaram()
 	beatitudeRegistrar(time.Now(), "agendado "+strconv.Itoa(r.n), "não enviado para "+nome, "erro", status)
 	beatitudeSend(beatitudeMarca + ": a mensagem das " + hora + " para " + nome + " *não saiu* (" + status + "). Se ainda quiser, me peça de novo.")
 }

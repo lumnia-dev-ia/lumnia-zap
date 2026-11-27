@@ -26,7 +26,7 @@ nova é ignorado, e valem os textos compilados.
 - `regras`: troca o texto de uma regra pela chave; `""` tira a regra. As
   chaves estão em `whatsapp-bridge/beatitude.go` (a lista em
   `beatitudeRodarClaude`): identidade, tom, formatacao, so_le, rascunhos,
-  horario, anexo, voz, sem_instrucoes, responder, terceiros, fazer_direto,
+  horario, agendadas, anexo, voz, sem_instrucoes, responder, terceiros, fazer_direto,
   o_que_alcanco, aprender, caderno, chrome_nunca, navegador,
   navegador_leitura, viagem, restaurante, audio, economia, perfil,
   ignorar_grupo, pendentes, temas, bastao, negada, midia. A hora atual

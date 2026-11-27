@@ -1,6 +1,18 @@
 # Mudanças
 
-## Próxima versão — mordomo: mensagem programada sem "sim"
+## 1.1.5 — novembro de 2026
+
+**O app mudou de endereço: beatitude.ai**
+- Desde 25/11, por volta das 11h45, beatitude.lumnia.dev redireciona para
+  beatitude.ai. Num redirecionamento para outro domínio o Zap perdia o token, o
+  app respondia "token_invalido" a cada minuto, o Cockpit mostrava o Mac sem
+  sinal e o brief não chegava ao grupo. A ponte passa a falar direto com
+  beatitude.ai, e o modo rápido configura o conector em beatitude.ai/mcp.
+- Pareamento que tenha o endereço antigo gravado passa a usar o novo sozinho.
+- Se o app mudar de endereço de novo, a ponte não manda a chamada sem o token:
+  o painel e o log dizem "o app mudou de endereço: X redireciona para Y".
+- Quem aplicou à mão o `"url": "https://beatitude.ai"` em
+  `store/beatitude-ponte.json` pode deixar como está.
 
 Vem das reclamações de 24/11 no grupo: o pedido de mensagem voltava com a
 descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
@@ -38,6 +50,25 @@ descrição do pedido em vez do texto, e às vezes sem cartão nenhum.
   regras com uma chave pública nova; a privada fica em `~/.lumnia/regras.key`
   no Mac do Diego. Pontes da 1.1.4 ou anteriores ignoram os pacotes novos e
   seguem com as regras compiladas.
+
+**Cancelar em frase livre e espelho no app (pacote de 17/11)**
+- Cancelar em frase livre funciona sem passar pelo Claude: "cancelar o envio
+  da mensagem para a Jianny", "não precisa mais mandar pra Marina". A ponte
+  acha a programada pelo nome ou pelo número; com mais de uma possível,
+  pergunta qual e nada é cancelado. Só vale para mensagem: "cancela a reunião"
+  segue para o mordomo, e relato ("ela cancelou") não é ordem.
+- *cancela agendada N* e *cancela a programada N* valem como *cancela N*. "O que
+  vai sair?" também lista as programadas.
+- Regra nova do mordomo (`agendadas`): não diz que "não há mensagem
+  programada" sem olhar a lista que recebe, nem cita telas que não existem.
+- Com o computador pareado, a ponte manda ao app as programadas (para quem,
+  quando, o texto) e as mudanças de estado das últimas 48 h, em
+  `/api/ponte/agendados`: é o que preenche o quadro "Programadas", até aqui
+  vazio para todos. O texto passa a ficar no servidor do app até o envio.
+- A ponte aplica o que a pessoa fizer nesse quadro: cancelar, enviar agora,
+  trocar o texto, trocar a hora (até 7 dias à frente). Cada pedido é avisado
+  no grupo ("Pedido feito no app: …") e confirmado ao app. Servidor sem a rota
+  (404): a ponte espera 30 minutos e segue normal.
 
 ## 1.1.4 — 24 de novembro de 2026
 

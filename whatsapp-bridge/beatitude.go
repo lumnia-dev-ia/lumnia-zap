@@ -317,6 +317,16 @@ func beatitudeOnMessage(msg *events.Message) {
 			return
 		}
 	}
+	// "agendadas" e cancelamento em frase livre: resolvidos pela ponte, sem o
+	// Claude (beatitude_agendadas.go)
+	if !especial && (beatitudeEhListaAgendadas(texto) || beatitudeEhCancelaLivre(texto)) {
+		if hora.After(beatitude.cfg.UltimoPedido) {
+			beatitude.cfg.UltimoPedido = hora
+			_ = beatitudeSalvar()
+		}
+		go beatitudeExecutarAgendadas(texto)
+		return
+	}
 	if !especial && beatitudeEhComando(texto) {
 		if hora.After(beatitude.cfg.UltimoPedido) {
 			beatitude.cfg.UltimoPedido = hora
@@ -619,6 +629,7 @@ func beatitudeRodarClaude(claude, pedido string, anexos []beatitudeAnexo) (strin
 		{"so_le", "Você só LÊ. Não existe ferramenta de envio para você. O que você escrever na resposta final é o que a ponte vai mandar ao grupo, e só ao grupo."},
 		{"rascunhos", "Rascunhos de resposta NÃO vão no texto visível. Coloque-os, no fim da resposta, num bloco exatamente assim: <rascunhos>[{\"n\":1,\"chat_jid\":\"JID exato da conversa, como veio das ferramentas\",\"texto\":\"o rascunho\",\"enviar_em\":\"só quando ela pediu horário: AAAA-MM-DD HH:MM\",\"anexo\":\"só quando a mensagem leva um arquivo do grupo: A1\"}]</rascunhos>. Numere a partir de 1 (ou do número indicado no bloco de mensagens já programadas, quando ele vier no pedido), na mesma ordem em que citou as conversas no texto visível. A ponte mostra cada rascunho num cartão com o nome real da conversa, o horário e o texto exato, e escreve como aprovar, mudar ou cancelar. Sem o bloco, nada existe: nunca escreva que há um rascunho, que algo ficou programado ou que ela pode aprovar o envio se o bloco não estiver nesta mesma resposta. Se não achar a conversa nem o número da pessoa, diga isso em uma linha e peça o número; não invente JID. Para um número de telefone sem conversa anterior, use DDI+DDD+número seguido de @s.whatsapp.net."},
 		{"horario", "Mensagem com horário: se ela pedir que a mensagem saia num horário (\"às 8h30 responde a Marina\", \"amanhã às 7 manda para o Pedro\"), ponha no rascunho \"enviar_em\":\"AAAA-MM-DD HH:MM\" (horário de Brasília; a hora de agora está no fim destas regras). Com mais de 5 minutos até o horário, a ponte já programa sozinha, sem esperar o sim, e ela muda ou cancela depois; com menos que isso, espera o sim. Serve para QUALQUER conversa do WhatsApp, esteja a pessoa em Pessoas ou não. Para quem está em Pessoas, criar_acao com horário também serve; se criar_acao não devolver número para o sim (contato fora de Pessoas, aguardando contato), use o rascunho com enviar_em, sem criar as duas coisas. Nunca ofereça envio imediato de algo que ela pediu para um horário. Se o horário for ambíguo (\"às 8\" de manhã ou de noite), pergunte em uma linha."},
+		{"agendadas", beatitudeRegraAgendadas},
 		{"anexo", beatitudeRegraAnexo},
 		{"voz", "Escreva os rascunhos na voz da pessoa, em primeira pessoa, curtos, no tom que ela já usa com aquele contato."},
 		{"sem_instrucoes", "Não escreva no texto visível instruções de como enviar, aprovar ou cancelar (a ponte já escreve), não repita os rascunhos e não descreva o que o rascunho diz: o cartão da ponte, logo abaixo, mostra para quem vai, quando sai e o texto inteiro."},

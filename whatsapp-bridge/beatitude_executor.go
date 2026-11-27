@@ -96,6 +96,12 @@ type beatitudeExecTrabalho struct {
 	resposta string // o que ela escreveu depois de "continua B1"
 }
 
+// beatitudeDrive: uma pasta Beatitude sincronizada com a nuvem da pessoa.
+type beatitudeDrive struct {
+	Nome  string // "Drive" ou "OneDrive", como vai na mensagem
+	Pasta string
+}
+
 // beatitudeChromeMu: um só usa o Chrome deste computador por vez, a tarefa de
 // navegador ou o executor.
 var beatitudeChromeMu sync.Mutex
@@ -137,19 +143,30 @@ var (
 		return beatitudeExecClaudeCtx(ctx, pasta, claude, prompt, sistema, extra, liberadas, negadas, beatitudeExecutorTimeout)
 	}
 	beatitudeExecutorAcharClaude = beatitudeAcharClaude
-	// beatitudeExecutorDrive: a pasta Beatitude do Google Drive para
-	// computador, se existir. A ponte não cria a pasta: quem a cria é a pessoa.
-	beatitudeExecutorDrive = func() string {
+	// beatitudeExecutorDrives: as pastas Beatitude sincronizadas neste
+	// computador, no Google Drive e no OneDrive. A pessoa pode ter um, os dois
+	// ou nenhum (o app aceita Google, Microsoft ou ambos); a cópia vai para
+	// todas as que existirem. A ponte não cria a pasta: quem a cria é o app.
+	beatitudeExecutorDrives = func() []beatitudeDrive {
 		home, _ := os.UserHomeDir()
-		for _, meu := range []string{"My Drive", "Meu Drive"} {
-			achados, _ := filepath.Glob(filepath.Join(home, "Library", "CloudStorage", "GoogleDrive-*", meu, "Beatitude"))
+		nuvem := filepath.Join(home, "Library", "CloudStorage")
+		padroes := []struct{ nome, padrao string }{
+			{"Drive", filepath.Join(nuvem, "GoogleDrive-*", "My Drive", "Beatitude")},
+			{"Drive", filepath.Join(nuvem, "GoogleDrive-*", "Meu Drive", "Beatitude")},
+			{"OneDrive", filepath.Join(nuvem, "OneDrive*", "Beatitude")},
+			{"OneDrive", filepath.Join(home, "OneDrive*", "Beatitude")}, // Linux e instalações antigas
+		}
+		var out []beatitudeDrive
+		ja := map[string]bool{}
+		for _, p := range padroes {
+			achados, _ := filepath.Glob(p.padrao)
 			for _, d := range achados {
-				if st, err := os.Stat(d); err == nil && st.IsDir() {
-					return d
+				if st, err := os.Stat(d); err == nil && st.IsDir() && !ja[d] {
+					out, ja[d] = append(out, beatitudeDrive{Nome: p.nome, Pasta: d}), true
 				}
 			}
 		}
-		return ""
+		return out
 	}
 	// beatitudeSendArquivoHook: os testes interceptam o arquivo enviado ao grupo.
 	beatitudeSendArquivoHook func(caminho string) (bool, string)
@@ -967,13 +984,29 @@ func beatitudeExecutorSaida(pasta string) (enviar, ficaram []string) {
 }
 
 // beatitudeExecutorCopiarParaDrive copia saida/ para Beatitude/Pedidos/B<n>
-// no Drive do computador. Devolve o caminho mostrado à pessoa ("" = sem Drive).
+// em cada nuvem sincronizada neste computador (Drive, OneDrive ou as duas).
+// Devolve onde ficou, como vai na mensagem ("" = nenhuma).
 func beatitudeExecutorCopiarParaDrive(pasta, codigo string) string {
-	drive := beatitudeExecutorDrive()
-	if drive == "" {
+	var onde []string
+	for _, d := range beatitudeExecutorDrives() {
+		if beatitudeExecutorCopiarSaida(pasta, filepath.Join(d.Pasta, "Pedidos", codigo)) {
+			achou := false
+			for _, n := range onde {
+				achou = achou || n == d.Nome
+			}
+			if !achou {
+				onde = append(onde, d.Nome)
+			}
+		}
+	}
+	if len(onde) == 0 {
 		return ""
 	}
-	destino := filepath.Join(drive, "Pedidos", codigo)
+	return strings.Join(onde, " e no ") + " em Beatitude/Pedidos/" + codigo
+}
+
+// beatitudeExecutorCopiarSaida copia saida/ para o destino; true se copiou algo.
+func beatitudeExecutorCopiarSaida(pasta, destino string) bool {
 	raiz := filepath.Join(pasta, "saida")
 	copiou := false
 	_ = filepath.WalkDir(raiz, func(p string, d os.DirEntry, err error) error {
@@ -1001,10 +1034,7 @@ func beatitudeExecutorCopiarParaDrive(pasta, codigo string) string {
 		}
 		return nil
 	})
-	if !copiou {
-		return ""
-	}
-	return "Beatitude/Pedidos/" + codigo
+	return copiou
 }
 
 // beatitudeCaminhoCurto: ~/Beatitude/Pedidos/B1 em vez do caminho inteiro.
@@ -1031,7 +1061,7 @@ func beatitudeExecutorEntregar(id int64, pasta, texto, estado string) {
 	var rodape []string
 	if len(enviar)+len(ficaram) > 0 {
 		if drive := beatitudeExecutorCopiarParaDrive(pasta, codigo); drive != "" {
-			rodape = append(rodape, "Salvo no Drive em "+drive+".")
+			rodape = append(rodape, "Salvo no "+drive+".")
 		} else {
 			rodape = append(rodape, "Salvo neste "+maquina()+" em "+beatitudeCaminhoCurto(filepath.Join(pasta, "saida"))+".")
 		}

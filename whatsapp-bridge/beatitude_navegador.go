@@ -70,6 +70,9 @@ var beatitudeNavLiberadas = []string{
 	"mcp__claude-in-chrome",
 	"mcp__beatitude", "mcp__claude_ai_Beatitude",
 	"mcp__claude_ai_Google_Calendar",
+	// quem usa Microsoft: a agenda do Outlook, só leitura (27-11)
+	"mcp__claude_ai_Microsoft_365__outlook_calendar_search",
+	"mcp__claude_ai_Microsoft_365__outlook_find_available_time",
 }
 
 func initBeatitudeNavegador() {

@@ -1447,6 +1447,7 @@ func beatitudeTestarRapidoHandler(w http.ResponseWriter, r *http.Request) {
 		"subida_ms":     m.SubidaMs(),
 		"api_ms":        m.ApiMs,
 		"tem_google":    strings.Contains(strings.ToLower(resp), "google") || strings.Contains(strings.ToLower(resp), "gmail"),
+		"tem_microsoft": strings.Contains(strings.ToLower(resp), "microsoft") || strings.Contains(strings.ToLower(resp), "outlook"),
 		"tem_beatitude": strings.Contains(strings.ToLower(resp), "beatitude"),
 		"tem_zap":       strings.Contains(strings.ToLower(resp), "lumnia"),
 	}

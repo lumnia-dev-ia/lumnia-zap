@@ -39,7 +39,7 @@ func executorDeTeste(t *testing.T, rodar claudeFalso) *executorTeste {
 	t.Helper()
 	e := &executorTeste{raiz: t.TempDir()}
 	antStore, antHook, antArq := panel.store, beatitudeSendHook, beatitudeSendArquivoHook
-	antRaiz, antSb, antClaude, antAchar, antDrive := beatitudeExecutorRaiz, beatitudeExecutorSandboxOK, beatitudeExecutorClaude, beatitudeExecutorAcharClaude, beatitudeExecutorDrive
+	antRaiz, antSb, antClaude, antAchar, antDrive := beatitudeExecutorRaiz, beatitudeExecutorSandboxOK, beatitudeExecutorClaude, beatitudeExecutorAcharClaude, beatitudeExecutorDrives
 	antAnexo := beatitudeArquivoDoAnexo
 	panel.store = storeDeTeste(t)
 	_, _ = panel.store.db.Exec(`CREATE TABLE beatitude_runs (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,14 +63,14 @@ func executorDeTeste(t *testing.T, rodar claudeFalso) *executorTeste {
 	beatitudeExecutorRaiz = func() string { return e.raiz }
 	beatitudeExecutorSandboxOK = func() (bool, string) { return true, "" }
 	beatitudeExecutorAcharClaude = func() (string, error) { return "/falso/claude", nil }
-	beatitudeExecutorDrive = func() string { return "" }
+	beatitudeExecutorDrives = func() []beatitudeDrive { return nil }
 	beatitudeExecutorClaude = func(ctx context.Context, pasta, claude, prompt, sistema string, extra, liberadas, negadas []string) (string, beatitudeMedida, error) {
 		return rodar(ctx, pasta, prompt, sistema, extra, liberadas, negadas)
 	}
 	t.Cleanup(func() {
 		executorEsperar(t)
 		panel.store, beatitudeSendHook, beatitudeSendArquivoHook = antStore, antHook, antArq
-		beatitudeExecutorRaiz, beatitudeExecutorSandboxOK, beatitudeExecutorClaude, beatitudeExecutorAcharClaude, beatitudeExecutorDrive = antRaiz, antSb, antClaude, antAchar, antDrive
+		beatitudeExecutorRaiz, beatitudeExecutorSandboxOK, beatitudeExecutorClaude, beatitudeExecutorAcharClaude, beatitudeExecutorDrives = antRaiz, antSb, antClaude, antAchar, antDrive
 		beatitudeArquivoDoAnexo = antAnexo
 		beatitude.mu.Lock()
 		beatitude.cfg = antCfg
@@ -341,7 +341,9 @@ func TestExecutorFilaEPara(t *testing.T) {
 func TestExecutorEntregaCortaArquivosETexto(t *testing.T) {
 	longo := strings.Repeat("a", beatitudeBastaoMaxResp+900)
 	drive := filepath.Join(t.TempDir(), "Beatitude")
+	onedrive := filepath.Join(t.TempDir(), "Beatitude")
 	_ = os.MkdirAll(drive, 0o700)
+	_ = os.MkdirAll(onedrive, 0o700)
 	e := executorDeTeste(t, func(ctx context.Context, pasta, prompt, sistema string, extra, lib, neg []string) (string, beatitudeMedida, error) {
 		for _, n := range []string{"1.txt", "2.txt", "3.txt", "4.txt", "5.txt", "6.txt", ".oculto"} {
 			_ = os.WriteFile(filepath.Join(pasta, "saida", n), []byte("x"), 0o600)
@@ -351,7 +353,10 @@ func TestExecutorEntregaCortaArquivosETexto(t *testing.T) {
 		f.Close()
 		return longo, beatitudeMedida{}, nil
 	})
-	beatitudeExecutorDrive = func() string { return drive }
+	// quem tem as duas nuvens recebe a cópia nas duas
+	beatitudeExecutorDrives = func() []beatitudeDrive {
+		return []beatitudeDrive{{Nome: "Drive", Pasta: drive}, {Nome: "OneDrive", Pasta: onedrive}}
+	}
 	b := bastaoDeTeste(t, `{"pedido":"gera os arquivos"}`)
 	if _, ok := beatitudeExecutorAceitar(*b, nil, "g"); !ok {
 		t.Fatal("deveria aceitar")
@@ -361,7 +366,7 @@ func TestExecutorEntregaCortaArquivosETexto(t *testing.T) {
 		t.Fatalf("anexados (no máximo 5, sem o de 20 MB): %v", arq)
 	}
 	g := e.grupo()
-	if !strings.Contains(g, "Salvo no Drive em Beatitude/Pedidos/B1.") || !strings.Contains(g, "Não anexei") || !strings.Contains(g, "0-grande.bin") || !strings.Contains(g, "6.txt") || strings.Contains(g, ".oculto") {
+	if !strings.Contains(g, "Salvo no Drive e no OneDrive em Beatitude/Pedidos/B1.") || !strings.Contains(g, "Não anexei") || !strings.Contains(g, "0-grande.bin") || !strings.Contains(g, "6.txt") || strings.Contains(g, ".oculto") {
 		t.Fatalf("rodapé: %q", g[len(g)-400:])
 	}
 	if strings.Contains(g, strings.Repeat("a", beatitudeBastaoMaxResp+300)) || !strings.Contains(g, "…") {
@@ -369,6 +374,9 @@ func TestExecutorEntregaCortaArquivosETexto(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(drive, "Pedidos", "B1", "6.txt")); err != nil {
 		t.Fatal("o Drive recebe todos os arquivos de saida/")
+	}
+	if _, err := os.Stat(filepath.Join(onedrive, "Pedidos", "B1", "1.txt")); err != nil {
+		t.Fatal("o OneDrive também recebe a cópia")
 	}
 	if _, err := os.Stat(filepath.Join(drive, "Pedidos", "B1", ".oculto")); err == nil {
 		t.Fatal("arquivo oculto não vai ao Drive")
